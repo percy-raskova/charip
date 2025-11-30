@@ -31,6 +31,7 @@ mod diagnostics;
 mod gotodef;
 mod hover;
 mod macros;
+mod myst_parser;
 mod references;
 mod rename;
 mod symbol;
