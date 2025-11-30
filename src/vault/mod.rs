@@ -587,10 +587,12 @@ pub struct MDFile {
     pub link_reference_definitions: Vec<MDLinkReferenceDefinition>,
     pub metadata: Option<MDMetadata>,
     pub codeblocks: Vec<MDCodeBlock>,
+    pub myst_symbols: Vec<MystSymbol>,
 }
 
 impl MDFile {
     fn new(context: &Settings, text: &str, path: PathBuf) -> MDFile {
+        let myst_symbols = myst_parser::parse(text);
         let code_blocks = MDCodeBlock::new(text).collect_vec();
         let file_name = path
             .file_stem()
@@ -635,6 +637,7 @@ impl MDFile {
             link_reference_definitions: link_refs.collect(),
             metadata,
             codeblocks: code_blocks,
+            myst_symbols,
         }
     }
 
@@ -655,6 +658,7 @@ impl MDFile {
             link_reference_definitions,
             metadata: _,
             codeblocks: _,
+            myst_symbols: _,
         } = self;
 
         iter::once(Referenceable::File(&self.path, self))
@@ -729,6 +733,7 @@ impl Default for Reference {
 use Reference::*;
 
 use crate::config::Settings;
+use crate::myst_parser::{self, MystSymbol};
 
 use self::{metadata::MDMetadata, parsing::MDCodeBlock};
 
