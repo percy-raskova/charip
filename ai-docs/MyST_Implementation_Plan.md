@@ -91,3 +91,22 @@ pub type MystWorkspaceGraph = DiGraph<DocumentNode, EdgeKind>;
 - [ ] **Graph Prototype**: Implement the `MystWorkspaceGraph` struct and test basic insertions.
 - [ ] **Vault Refactor**: Replace `HashMap` storage with Graph storage.
 - [ ] **LSP Adapters**: Rewrite `get_completions` and `goto_definition` to use the Graph API.
+
+## 6. Progress Log
+
+### Completed
+*   **Phase 1 (Partial)**:
+    *   Swapped `markdown-rs` dependency for `markdown` (micromark).
+    *   Created `src/myst_parser.rs` module.
+    *   Implemented basic AST traversal to identify MyST Directives (e.g., ````{name}`) from fenced code blocks.
+    *   Added unit tests for directive parsing.
+
+### Immediate Next Steps
+1.  **Support MyST Roles**:
+    *   Extend `myst_parser.rs` to identify inline roles (`{role}content`).
+    *   Likely requires a regex pass on `Node::Text` nodes since standard CommonMark parsers treat roles as plain text.
+2.  **Graph Integration (Phase 2 Start)**:
+    *   Create a new module `src/graph.rs` (or similar).
+    *   Define `MystWorkspaceGraph` using `petgraph`.
+    *   Test inserting nodes and edges.
+
