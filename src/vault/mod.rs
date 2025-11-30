@@ -178,6 +178,28 @@ impl Vault {
         }
     }
 
+    /// Select all MyST symbols in a file if path is Some, else all in vault.
+    pub fn select_myst_symbols<'a>(
+        &'a self,
+        path: Option<&'a Path>,
+    ) -> Vec<(&'a Path, &'a MystSymbol)> {
+        match path {
+            Some(path) => self
+                .md_files
+                .get(path)
+                .map(|md| &md.myst_symbols)
+                .map(|vec| vec.iter().map(|s| (path, s)).collect())
+                .unwrap_or_default(),
+            None => self
+                .md_files
+                .iter()
+                .flat_map(|(path, md)| {
+                    md.myst_symbols.iter().map(|s| (path.as_path(), s))
+                })
+                .collect(),
+        }
+    }
+
     pub fn select_referenceable_at_position<'a>(
         &'a self,
         path: &'a Path,
@@ -733,7 +755,7 @@ impl Default for Reference {
 use Reference::*;
 
 use crate::config::Settings;
-use crate::myst_parser::{self, MystSymbol};
+use crate::myst_parser::{self, MystSymbol, MystSymbolKind};
 
 use self::{metadata::MDMetadata, parsing::MDCodeBlock};
 
@@ -2822,5 +2844,99 @@ Continued
         })];
 
         assert_eq!(parsed, expected);
+    }
+}
+
+#[cfg(test)]
+mod myst_integration_tests {
+    use super::*;
+    use crate::config::Settings;
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// Helper to create a test vault directory (avoids hidden .tmp dirs)
+    fn create_test_vault_dir() -> (TempDir, std::path::PathBuf) {
+        let temp_dir = TempDir::new().unwrap();
+        // Create a non-hidden subdirectory since WalkDir filters out .* dirs
+        let vault_dir = temp_dir.path().join("vault");
+        fs::create_dir(&vault_dir).unwrap();
+        (temp_dir, vault_dir)
+    }
+
+    #[test]
+    fn test_vault_extracts_myst_directives() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+        let content = r#"
+# My Document
+
+```{note}
+This is a note.
+```
+
+```{warning}
+Be careful!
+```
+"#;
+        let test_file = vault_dir.join("test.md");
+        fs::write(&test_file, content).unwrap();
+
+        let settings = Settings::default();
+        let vault = Vault::construct_vault(&settings, &vault_dir)
+            .expect("Failed to construct vault");
+
+        let symbols = vault.select_myst_symbols(None);
+        let directives: Vec<_> = symbols
+            .iter()
+            .filter(|(_, s)| s.kind == MystSymbolKind::Directive)
+            .collect();
+
+        assert_eq!(directives.len(), 2, "Should find 2 directives");
+    }
+
+    #[test]
+    fn test_vault_extracts_myst_anchors() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+        let content = "(my-anchor)=\n# Important Section";
+        fs::write(vault_dir.join("test.md"), content).unwrap();
+
+        let settings = Settings::default();
+        let vault = Vault::construct_vault(&settings, &vault_dir)
+            .expect("Failed to construct vault");
+
+        let symbols = vault.select_myst_symbols(None);
+        let anchors: Vec<_> = symbols
+            .iter()
+            .filter(|(_, s)| s.kind == MystSymbolKind::Anchor)
+            .collect();
+
+        assert_eq!(anchors.len(), 1, "Should find 1 anchor");
+        assert_eq!(anchors[0].1.name, "my-anchor");
+    }
+
+    #[test]
+    fn test_vault_finds_anchors_across_files() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+        fs::write(
+            vault_dir.join("chapter1.md"),
+            "(chapter-1-intro)=\n# Chapter 1"
+        ).unwrap();
+
+        fs::write(
+            vault_dir.join("chapter2.md"),
+            "(chapter-2-summary)=\n# Chapter 2"
+        ).unwrap();
+
+        let settings = Settings::default();
+        let vault = Vault::construct_vault(&settings, &vault_dir)
+            .expect("Failed to construct vault");
+
+        let all_symbols = vault.select_myst_symbols(None);
+        let anchors: Vec<_> = all_symbols
+            .iter()
+            .filter(|(_, s)| s.kind == MystSymbolKind::Anchor)
+            .collect();
+
+        assert_eq!(anchors.len(), 2, "Should find 2 anchors across files");
     }
 }

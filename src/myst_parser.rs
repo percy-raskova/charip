@@ -1,8 +1,17 @@
 use markdown::{to_mdast, ParseOptions, mdast::Node};
 
+/// Type-safe representation of MyST symbol kinds.
+/// Using an enum prevents typos and enables compile-time checking.
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+pub enum MystSymbolKind {
+    Directive,
+    Anchor,
+    Reference,  // Placeholder for future MyST cross-refs like {ref}`target`
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct MystSymbol {
-    pub kind: String, // "directive", "anchor", "reference"
+    pub kind: MystSymbolKind,
     pub name: String,
     pub line: usize,
 }
@@ -37,7 +46,7 @@ pub fn scan_for_myst(node: &Node, symbols: &mut Vec<MystSymbol>) {
                  if lang.starts_with('{') && lang.ends_with('}') {
                     let directive = lang.trim_matches(|c| c == '{' || c == '}');
                     symbols.push(MystSymbol {
-                        kind: "directive".to_string(),
+                        kind: MystSymbolKind::Directive,
                         name: directive.to_string(),
                         line: code.position.as_ref().map(|p| p.start.line).unwrap_or(0),
                     });
@@ -56,7 +65,7 @@ pub fn scan_for_myst(node: &Node, symbols: &mut Vec<MystSymbol>) {
                  
                  if !target.is_empty() {
                      symbols.push(MystSymbol {
-                        kind: "anchor".to_string(),
+                        kind: MystSymbolKind::Anchor,
                         name: target.to_string(),
                         line: text.position.as_ref().map(|p| p.start.line).unwrap_or(0),
                     });
@@ -80,7 +89,7 @@ This is the body of the note.
 "#;
         let symbols = parse(input);
         assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].kind, "directive");
+        assert_eq!(symbols[0].kind, MystSymbolKind::Directive);
         assert_eq!(symbols[0].name, "note");
     }
 
@@ -89,7 +98,7 @@ This is the body of the note.
         let input = "(my-target)=";
         let symbols = parse(input);
         assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].kind, "anchor");
+        assert_eq!(symbols[0].kind, MystSymbolKind::Anchor);
         assert_eq!(symbols[0].name, "my-target");
     }
 
@@ -107,17 +116,17 @@ This is a note
     let mut symbols = Vec::new();
     scan_for_myst(&ast, &mut symbols);
 
-    assert!(symbols.iter().any(|s| s.kind == "directive" && s.name == "note"));
+    assert!(symbols.iter().any(|s| s.kind == MystSymbolKind::Directive && s.name == "note"));
 }
 
 #[test]
 fn test_finds_myst_anchor() {
     let input = "Here is a text.\n\n(my-target)=\n# Heading";
-    
+
     let ast = markdown::to_mdast(input, &markdown::ParseOptions::default()).unwrap();
     let mut symbols = Vec::new();
     scan_for_myst(&ast, &mut symbols);
 
-    assert!(symbols.iter().any(|s| s.kind == "anchor" && s.name == "my-target"));
+    assert!(symbols.iter().any(|s| s.kind == MystSymbolKind::Anchor && s.name == "my-target"));
 }
 }

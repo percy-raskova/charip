@@ -105,6 +105,30 @@ impl Settings {
     }
 }
 
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            dailynote: "%Y-%m-%d".to_string(),
+            new_file_folder_path: "".to_string(),
+            daily_notes_folder: "".to_string(),
+            heading_completions: true,
+            title_headings: true,
+            unresolved_diagnostics: true,
+            semantic_tokens: false,
+            tags_in_codeblocks: false,
+            references_in_codeblocks: false,
+            include_md_extension_md_link: false,
+            include_md_extension_wikilink: false,
+            hover: true,
+            case_matching: Case::Smart,
+            inlay_hints: false,
+            block_transclusion: true,
+            block_transclusion_length: EmbeddedBlockTransclusionLength::Full,
+            link_filenames_only: false,
+        }
+    }
+}
+
 #[derive(Deserialize, Debug, Default)]
 struct ObsidianDailyNoteConfig {
     folder: Option<String>,
