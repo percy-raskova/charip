@@ -1,3 +1,4 @@
+mod ast_refs;
 mod helpers;
 mod metadata;
 mod parsing;
