@@ -18,7 +18,7 @@ use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
     iter,
-    ops::{Deref, DerefMut, Not},
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -26,7 +26,7 @@ use std::{
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use rayon::prelude::*;
-use regex::{Captures, Match, Regex};
+use regex::Regex;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::{Location, Position, SymbolInformation, SymbolKind, Url};
@@ -586,18 +586,6 @@ impl MDFile {
             .expect("file should have file stem")
             .to_str()
             .unwrap_or_default();
-        #[cfg(feature = "ast_parsing")]
-        let links = match context {
-            Settings {
-                references_in_codeblocks: false,
-                ..
-            } => Reference::new_ast(text, file_name)
-                .filter(|it| !code_blocks.iter().any(|codeblock| codeblock.includes(it)))
-                .collect_vec(),
-            _ => Reference::new_ast(text, file_name).collect_vec(),
-        };
-
-        #[cfg(not(feature = "ast_parsing"))]
         let links = match context {
             Settings {
                 references_in_codeblocks: false,
@@ -756,108 +744,19 @@ impl Reference {
         }
     }
 
-    pub fn new<'a>(text: &'a str, file_name: &'a str) -> impl Iterator<Item = Reference> + 'a {
-        static MD_LINK_RE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\[(?<display>[^\[\]\.]*?)\]\(<?(?<filepath>(\.?\/)?[^\[\]\|\.\#<>]+?)?(?<ending>\.[^\# <>]+?)?(\#(?<infileref>[^\[\]\.\|<>]+?))?>?\)")
-                .expect("MD Link Not Constructing")
-        }); // [display](relativePath)
-
-        let md_links = MD_LINK_RE
-            .captures_iter(text)
-            .filter(|captures| {
-                matches!(
-                    captures.name("ending").map(|ending| ending.as_str()),
-                    Some(".md") | None
-                )
-            })
-            .flat_map(RegexTuple::new)
-            .flat_map(|regextuple| {
-                generic_link_constructor::<MDReferenceConstructor>(text, file_name, regextuple)
-            });
-
-        let tags = MDTag::new(text).map(|tag| {
-            Tag(ReferenceData {
-                display_text: None,
-                range: tag.range,
-                reference_text: format!("#{}", tag.tag_ref),
-            })
-        });
-
-        static FOOTNOTE_LINK_RE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?<start>\[?)(?<full>\[(?<index>\^[^\[\] ]+)\])(?<end>:?)").unwrap()
-        });
-        let footnote_references = FOOTNOTE_LINK_RE
-            .captures_iter(text)
-            .filter(|capture| matches!(
-                (capture.name("start"), capture.name("end")),
-                (Some(start), Some(end)) if !start.as_str().starts_with('[') && !end.as_str().ends_with(':'))
-            )
-            .flat_map(
-                |capture| match (capture.name("full"), capture.name("index")) {
-                    (Some(full), Some(index)) => Some((full, index)),
-                    _ => None,
-                },
-            )
-            .map(|(outer, index)| {
-                Footnote(ReferenceData {
-                    reference_text: index.as_str().into(),
-                    range: MyRange::from_range(&Rope::from_str(text), outer.range()),
-                    display_text: None,
-                })
-            });
-
-        let link_ref_references: Vec<Reference> = if MDLinkReferenceDefinition::new(text)
-            .collect_vec()
-            .is_empty()
-            .not()
-        {
-            static LINK_REF_RE: Lazy<Regex> = Lazy::new(|| {
-                Regex::new(r"([^\[]|^)(?<full>\[(?<index>[^\^][^\[\] ]+)\])([^\]\(\:]|$)").unwrap()
-            });
-
-            let link_ref_references: Vec<Reference> = LINK_REF_RE
-                .captures_iter(text)
-                .par_bridge()
-                .flat_map(
-                    |capture| match (capture.name("full"), capture.name("index")) {
-                        (Some(full), Some(index)) => Some((full, index)),
-                        _ => None,
-                    },
-                )
-                .map(|(outer, index)| {
-                    LinkRef(ReferenceData {
-                        reference_text: index.as_str().into(),
-                        range: MyRange::from_range(&Rope::from_str(text), outer.range()),
-                        display_text: None,
-                    })
-                })
-                .collect::<Vec<_>>();
-
-            link_ref_references
-        } else {
-            vec![]
-        };
-
-        md_links
-            .into_iter()
-            .chain(tags)
-            .chain(footnote_references)
-            .chain(link_ref_references)
-    }
-
-    /// AST-based reference parsing (parallel implementation to regex-based `new()`).
+    /// AST-based reference parsing using markdown-rs.
     ///
-    /// This method uses the markdown-rs AST parser instead of regex patterns to
-    /// extract references. It produces equivalent results to `new()` for link types
-    /// (wikilinks, MD links, footnotes, link references) but does NOT extract tags.
+    /// This method uses the markdown-rs AST parser to extract references.
+    /// It extracts MD links, footnotes, and link references but does NOT extract tags
+    /// (tags are extracted separately by MDTag::new()).
     ///
     /// # Arguments
     /// * `text` - The markdown source text
-    /// * `file_name` - The name of the current file (used for same-file references like `[[#heading]]`)
+    /// * `file_name` - The name of the current file (used for same-file references like `#heading`)
     ///
     /// # Returns
     /// An iterator over all `Reference` items found in the document (excluding tags).
-    pub fn new_ast(text: &str, file_name: &str) -> impl Iterator<Item = Reference> {
+    pub fn new(text: &str, file_name: &str) -> impl Iterator<Item = Reference> {
         ast_refs::extract_references_from_ast(text, file_name).into_iter()
     }
 
@@ -945,107 +844,6 @@ impl Reference {
                 }
             },
         }
-    }
-}
-
-struct RegexTuple<'a> {
-    range: Match<'a>,
-    file_path: Option<Match<'a>>,
-    infile_ref: Option<Match<'a>>,
-    display_text: Option<Match<'a>>,
-}
-
-impl RegexTuple<'_> {
-    fn new(capture: Captures) -> Option<RegexTuple> {
-        match (
-            capture.get(0),
-            capture.name("filepath"),
-            capture.name("infileref"),
-            capture.name("display"),
-        ) {
-            (Some(range), file_path, infile_ref, display_text) => Some(RegexTuple {
-                range,
-                file_path,
-                infile_ref,
-                display_text,
-            }),
-            _ => None,
-        }
-    }
-}
-
-trait ParseableReferenceConstructor {
-    fn new_heading(data: ReferenceData, path: &str, heading: &str) -> Reference;
-    fn new_file_link(data: ReferenceData) -> Reference;
-    fn new_indexed_block_link(data: ReferenceData, path: &str, index: &str) -> Reference;
-} // TODO: Turn this into a macro
-
-struct MDReferenceConstructor;
-
-impl ParseableReferenceConstructor for MDReferenceConstructor {
-    fn new_heading(data: ReferenceData, path: &str, heading: &str) -> Reference {
-        Reference::MDHeadingLink(data, path.into(), heading.into())
-    }
-    fn new_file_link(data: ReferenceData) -> Reference {
-        Reference::MDFileLink(data)
-    }
-    fn new_indexed_block_link(data: ReferenceData, path: &str, index: &str) -> Reference {
-        Reference::MDIndexedBlockLink(data, path.into(), index.into())
-    }
-}
-
-fn generic_link_constructor<T: ParseableReferenceConstructor>(
-    text: &str,
-    file_name: &str,
-    RegexTuple {
-        range,
-        file_path,
-        infile_ref,
-        display_text,
-    }: RegexTuple,
-) -> Option<Reference> {
-    if file_path.is_some_and(|path| {
-        path.as_str().starts_with("http://")
-            || path.as_str().starts_with("https://")
-            || path.as_str().starts_with("data:")
-    }) {
-        return None;
-    }
-
-    let decoded_filepath = file_path
-        .map(|file_path| {
-            let file_path = file_path.as_str();
-            urlencoding::decode(file_path).map_or_else(|_| file_path.to_string(), |d| d.to_string())
-        })
-        .unwrap_or_else(|| file_name.to_string());
-
-    match (range, decoded_filepath.as_str(), infile_ref, display_text) {
-        // Pure file reference as there is no infileref such as #... for headings or #^... for indexed blocks
-        (full, filepath, None, display) => Some(T::new_file_link(ReferenceData {
-            reference_text: filepath.into(),
-            range: MyRange::from_range(&Rope::from_str(text), full.range()),
-            display_text: display.map(|d| d.as_str().into()),
-        })),
-        (full, filepath, Some(infile), display) if infile.as_str().get(0..1) == Some("^") => {
-            Some(T::new_indexed_block_link(
-                ReferenceData {
-                    reference_text: format!("{}#{}", filepath, infile.as_str()),
-                    range: MyRange::from_range(&Rope::from_str(text), full.range()),
-                    display_text: display.map(|d| d.as_str().into()),
-                },
-                filepath,
-                &infile.as_str()[1..], // drop the ^ for the index
-            ))
-        }
-        (full, filepath, Some(infile), display) => Some(T::new_heading(
-            ReferenceData {
-                reference_text: format!("{}#{}", filepath, infile.as_str()),
-                range: MyRange::from_range(&Rope::from_str(text), full.range()),
-                display_text: display.map(|d| d.as_str().into()),
-            },
-            filepath,
-            infile.as_str(),
-        )),
     }
 }
 

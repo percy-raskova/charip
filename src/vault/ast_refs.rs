@@ -148,8 +148,14 @@ fn extract_md_link(link: &markdown::mdast::Link, _text: &str, rope: &Rope) -> Op
         .unwrap_or_else(|| path.clone());
 
     // Only accept .md files or files without extension
-    if !path.is_empty() && !path.ends_with(".md") && path.contains('.') {
-        return None;
+    // Check only the filename portion for extensions, not the whole path
+    // (e.g., "./path/to/file" should work, but "./path/to/file.txt" should not)
+    if !path.is_empty() && !path.ends_with(".md") {
+        // Get the filename portion (after the last slash)
+        let filename = path.rsplit('/').next().unwrap_or(&path);
+        if filename.contains('.') {
+            return None;
+        }
     }
 
     // Extract display text from link children
@@ -332,6 +338,47 @@ mod tests {
                 assert_eq!(index, "abc123");
             }
             _ => panic!("Expected MDIndexedBlockLink"),
+        }
+    }
+
+    #[test]
+    fn test_md_link_with_block_no_extension() {
+        // Like path/to/link#^index1 (no .md extension)
+        let text = "[link](path/to/link#^index1)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1, "Should extract 1 reference");
+        match &refs[0] {
+            Reference::MDIndexedBlockLink(data, file, index) => {
+                assert_eq!(data.reference_text, "path/to/link#^index1");
+                assert_eq!(file, "path/to/link");
+                assert_eq!(index, "index1");
+            }
+            _ => panic!("Expected MDIndexedBlockLink, got {:?}", refs[0]),
+        }
+    }
+
+    #[test]
+    fn test_md_link_with_trailing_colon() {
+        // Regression test: link followed by colon on multiline text
+        // Note: 4+ spaces of indentation creates a code block in markdown!
+        // The original test text was indented with 12 spaces, making it a code block.
+        let text = r#"
+Buggy cross [link](path/to/link#^index1):
+
+(this causes bug)
+"#;
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        eprintln!("Refs found: {:?}", refs);
+        assert_eq!(refs.len(), 1, "Should extract 1 reference");
+        match &refs[0] {
+            Reference::MDIndexedBlockLink(data, file, index) => {
+                assert_eq!(data.reference_text, "path/to/link#^index1");
+                assert_eq!(file, "path/to/link");
+                assert_eq!(index, "index1");
+            }
+            _ => panic!("Expected MDIndexedBlockLink, got {:?}", refs[0]),
         }
     }
 

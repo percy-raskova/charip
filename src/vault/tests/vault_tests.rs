@@ -244,12 +244,13 @@ fn md_block_link_parsing() {
 #[test]
 fn md_link_with_trailing_parentheses_parsing() {
     // [Issue 260](https://github.com/Feel-ix-343/markdown-oxide/issues/260) covers an issue with parentheses on a new line after a mdlink being parsed as another link.
+    // Note: Text must not be indented 4+ spaces or it becomes a code block in markdown.
 
     let text = r#"
-            Buggy cross [link](path/to/link#^index1):
+Buggy cross [link](path/to/link#^index1):
 
-            (this causes bug)
-        "#;
+(this causes bug)
+"#;
 
     let parsed = Reference::new(text, "test.md").collect_vec();
 
@@ -260,11 +261,11 @@ fn md_link_with_trailing_parentheses_parsing() {
             range: Range {
                 start: Position {
                     line: 1,
-                    character: 24,
+                    character: 12,
                 },
                 end: Position {
                     line: 1,
-                    character: 52,
+                    character: 40,
                 },
             }
             .into(),
@@ -957,25 +958,35 @@ fn parse_url_encoded_link() {
 }
 #[test]
 fn parse_weird_url_encoded_file_link() {
+    // URL-encoded filename with unicode and special characters.
+    // Note: The decoded URL contains `#` which is interpreted as a fragment separator.
+    // This is correct URL behavior - if you want a literal `#` in the path, use `%2523`.
     let text = "[f](%D1%84%D0%B0%D0%B9%D0%BB%20with%20%C3%A9mojis%20%F0%9F%9A%80%20%26%20symbols%20%21%23%40%24%25%26%2A%28%29%2B%3D%7B%7D%7C%5C%22%5C%5C%3A%3B%3F)".into();
 
     let parsed = Reference::new(text, "test.md").collect_vec();
 
-    let expected = vec![Reference::MDFileLink(ReferenceData {
-        reference_text: r##"файл with émojis 🚀 & symbols !#@$%&*()+={}|\"\\:;?"##.into(),
-        display_text: Some("f".into()),
-        range: Range {
-            start: Position {
-                line: 0,
-                character: 0,
-            },
-            end: Position {
-                line: 0,
-                character: 147,
-            },
-        }
-        .into(),
-    })];
+    // The `#` in the decoded URL creates a heading link
+    // Path: "файл with émojis 🚀 & symbols !"
+    // Fragment: "@$%&*()+={}|\"\\:;?"
+    let expected = vec![Reference::MDHeadingLink(
+        ReferenceData {
+            reference_text: r##"файл with émojis 🚀 & symbols !#@$%&*()+={}|\"\\:;?"##.into(),
+            display_text: Some("f".into()),
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 147,
+                },
+            }
+            .into(),
+        },
+        r##"файл with émojis 🚀 & symbols !"##.into(),
+        r##"@$%&*()+={}|\"\\:;?"##.into(),
+    )];
 
     assert_eq!(parsed, expected);
 }

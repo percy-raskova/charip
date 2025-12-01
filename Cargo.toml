@@ -33,10 +33,6 @@ urlencoding = "2.1.3"
 markdown = "1.0.0-alpha.18"
 petgraph = "0.8.3"
 
-[features]
-default = ["ast_parsing"]
-ast_parsing = []
-
 [dev-dependencies]
 tempfile = "3"
 
