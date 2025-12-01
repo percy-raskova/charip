@@ -1,6 +1,9 @@
 //! Helper types and utilities for the vault module.
 
 use std::ops::Deref;
+use std::path::Path;
+
+use pathdiff::diff_paths;
 
 /// Represents a reference name that may contain a path and/or infile reference.
 #[derive(Debug, PartialEq, Eq, Default)]
@@ -43,4 +46,9 @@ impl From<&str> for Refname {
             ..Default::default()
         }
     }
+}
+
+/// Utility function to get the Obsidian-style reference path from a file path.
+pub fn get_obsidian_ref_path(root_dir: &Path, path: &Path) -> Option<String> {
+    diff_paths(path, root_dir).and_then(|diff| diff.with_extension("").to_str().map(String::from))
 }

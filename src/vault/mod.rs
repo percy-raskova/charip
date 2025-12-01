@@ -6,8 +6,11 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use helpers::Refname;
-pub use types::{HeadingLevel, MyRange};
+pub use helpers::{get_obsidian_ref_path, Refname};
+pub use types::{
+    HeadingLevel, MDFootnote, MDHeading, MDIndexedBlock, MDLinkReferenceDefinition, MDTag, MyRange,
+    Rangeable,
+};
 
 use std::{
     char,
@@ -21,7 +24,6 @@ use std::{
 
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-use pathdiff::diff_paths;
 use rayon::prelude::*;
 use regex::{Captures, Match, Regex};
 use ropey::Rope;
@@ -566,59 +568,6 @@ impl AsRef<str> for Block<'_> {
     }
 }
 
-pub trait Rangeable {
-    fn range(&self) -> &MyRange;
-    fn includes(&self, other: &impl Rangeable) -> bool {
-        let self_range = self.range();
-        let other_range = other.range();
-
-        (self_range.start.line < other_range.start.line
-            || (self_range.start.line == other_range.start.line
-                && self_range.start.character <= other_range.start.character))
-            && (self_range.end.line > other_range.end.line
-                || (self_range.end.line == other_range.end.line
-                    && self_range.end.character >= other_range.end.character))
-    }
-
-    fn includes_position(&self, position: Position) -> bool {
-        let range = self.range();
-        (range.start.line < position.line
-            || (range.start.line == position.line && range.start.character <= position.character))
-            && (range.end.line > position.line
-                || (range.end.line == position.line && range.end.character >= position.character))
-    }
-}
-
-impl Rangeable for MDHeading {
-    fn range(&self) -> &MyRange {
-        &self.range
-    }
-}
-
-impl Rangeable for MDFootnote {
-    fn range(&self) -> &MyRange {
-        &self.range
-    }
-}
-
-impl Rangeable for MDIndexedBlock {
-    fn range(&self) -> &MyRange {
-        &self.range
-    }
-}
-
-impl Rangeable for MDTag {
-    fn range(&self) -> &MyRange {
-        &self.range
-    }
-}
-
-impl Rangeable for MDLinkReferenceDefinition {
-    fn range(&self) -> &MyRange {
-        &self.range
-    }
-}
-
 impl Rangeable for Reference {
     fn range(&self) -> &MyRange {
         &self.range
@@ -1147,21 +1096,6 @@ fn generic_link_constructor<T: ParseableReferenceConstructor>(
 }
 
 
-#[derive(Debug, Default, PartialEq, Eq, Clone)]
-pub struct MDHeading {
-    pub heading_text: String,
-    pub range: MyRange,
-    pub level: HeadingLevel,
-}
-
-impl Hash for MDHeading {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.level.hash(state);
-        self.heading_text.hash(state)
-    }
-}
-
-
 impl MDHeading {
     fn new(text: &str) -> impl Iterator<Item = MDHeading> + '_ {
         static HEADING_RE: Lazy<Regex> =
@@ -1185,19 +1119,6 @@ impl MDHeading {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct MDIndexedBlock {
-    /// THe index of the block; does not include '^'
-    pub index: String,
-    pub range: MyRange,
-}
-
-impl Hash for MDIndexedBlock {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.index.hash(state);
-    }
-}
-
 impl MDIndexedBlock {
     fn new(text: &str) -> impl Iterator<Item = MDIndexedBlock> + '_ {
         static INDEXED_BLOCK_RE: Lazy<Regex> =
@@ -1216,20 +1137,6 @@ impl MDIndexedBlock {
 
         indexed_blocks
     } // Make this better identify the full blocks
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct MDFootnote {
-    pub index: String,
-    pub footnote_text: String,
-    pub range: MyRange,
-}
-
-impl Hash for MDFootnote {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.index.hash(state);
-        self.footnote_text.hash(state);
-    }
 }
 
 impl MDFootnote {
@@ -1253,18 +1160,6 @@ impl MDFootnote {
             });
 
         footnotes
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct MDTag {
-    pub tag_ref: String,
-    pub range: MyRange,
-}
-
-impl Hash for MDTag {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.tag_ref.hash(state);
     }
 }
 
@@ -1308,14 +1203,6 @@ impl MDTag {
 
         tagged_blocks
     }
-}
-
-#[derive(Clone, Hash, Eq, PartialEq, Debug)]
-pub struct MDLinkReferenceDefinition {
-    pub link_ref_name: String,
-    pub range: MyRange,
-    pub url: String,
-    pub title: Option<String>,
 }
 
 impl MDLinkReferenceDefinition {
@@ -1363,11 +1250,6 @@ pub enum Referenceable<'a> {
     /// full path, link path, index (without ^)
     UnresovledIndexedBlock(PathBuf, &'a String, &'a String),
     LinkRefDef(&'a PathBuf, &'a MDLinkReferenceDefinition),
-}
-
-/// Utility function
-pub fn get_obsidian_ref_path(root_dir: &Path, path: &Path) -> Option<String> {
-    diff_paths(path, root_dir).and_then(|diff| diff.with_extension("").to_str().map(String::from))
 }
 impl Referenceable<'_> {
     /// Gets the generic reference name for a referenceable. This will not include any display text. If trying to determine if text is a reference of a particular referenceable, use the `is_reference` function
