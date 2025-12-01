@@ -392,16 +392,9 @@ impl<'a> LinkCompleter<'a> for WikiLinkCompleter<'a> {
     }
 
     fn completion_text_edit(&self, display: Option<&str>, refname: &str) -> CompletionTextEdit {
-        let formatted_refname = if self.settings().include_md_extension_wikilink {
-            if let Some(hash_pos) = refname.find('#') {
-                let (filename, heading) = refname.split_at(hash_pos);
-                format!("{}.md{}", filename, heading)
-            } else {
-                format!("{}.md", refname)
-            }
-        } else {
-            refname.to_string()
-        };
+        // Wikilinks never include .md extension - this completer is deprecated
+        // and will be removed when wikilink support is fully dropped
+        let formatted_refname = refname.to_string();
 
         CompletionTextEdit::Edit(TextEdit {
             range: Range {

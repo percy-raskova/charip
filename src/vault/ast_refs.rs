@@ -67,7 +67,7 @@ fn has_link_definitions(node: &Node) -> bool {
 fn traverse_node(
     node: &Node,
     text: &str,
-    file_name: &str,
+    file_name: &str, // Kept for API compatibility, passed through recursion
     rope: &Rope,
     has_definitions: bool,
     refs: &mut Vec<Reference>,
@@ -79,10 +79,6 @@ fn traverse_node(
             }
         }
         Node::Text(text_node) => {
-            // Extract wikilinks from text nodes (not native CommonMark)
-            let wikilinks = extract_wikilinks(text_node, file_name, rope);
-            refs.extend(wikilinks);
-
             // Extract footnotes from text nodes (when no definition exists,
             // markdown-rs doesn't parse them as FootnoteReference)
             let footnotes = extract_footnotes_from_text(text_node, rope);
@@ -213,19 +209,6 @@ fn extract_text_from_children(children: &[Node]) -> Option<String> {
     }
 }
 
-/// Regex for parsing wikilinks from text nodes.
-///
-/// Captures:
-/// - filepath: The file path (optional)
-/// - infileref: The heading or block reference after # (optional)
-/// - ending: File extension like .md (optional, used for filtering)
-/// - display: Display text after | (optional)
-static WIKILINK_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r"\[\[(?<filepath>[^\[\]\|\.\#]+)?(\#(?<infileref>[^\[\]\.\|]+))?(?<ending>\.[^\# <>]+)?(\|(?<display>[^\[\]\.\|]+))?\]\]"
-    ).unwrap()
-});
-
 /// Regex for parsing footnote references from text nodes.
 ///
 /// This handles footnotes that appear in text when there's no definition
@@ -234,87 +217,6 @@ static WIKILINK_RE: Lazy<Regex> = Lazy::new(|| {
 /// Matches: [^identifier] but NOT [^identifier]: (which is a definition)
 static FOOTNOTE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?<start>\[?)(?<full>\[(?<index>\^[^\[\] ]+)\])(?<end>:?)").unwrap());
-
-/// Extract wikilinks from a Text node.
-///
-/// Wikilinks are not native CommonMark, so they appear as plain text.
-/// We apply a scoped regex to extract them with proper offset adjustment.
-fn extract_wikilinks(
-    text_node: &markdown::mdast::Text,
-    file_name: &str,
-    rope: &Rope,
-) -> Vec<Reference> {
-    let position = match &text_node.position {
-        Some(pos) => pos,
-        None => return Vec::new(),
-    };
-
-    let base_offset = position.start.offset;
-    let node_text = &text_node.value;
-
-    WIKILINK_RE
-        .captures_iter(node_text)
-        .filter(|captures| {
-            // Filter to only .md files or no extension
-            matches!(
-                captures.name("ending").map(|e| e.as_str()),
-                Some(".md") | None
-            )
-        })
-        .filter_map(|captures| {
-            let full_match = captures.get(0)?;
-
-            // Calculate absolute byte range in source document
-            let start = base_offset + full_match.start();
-            let end = base_offset + full_match.end();
-            let range = MyRange::from_range(rope, start..end);
-
-            let filepath = captures
-                .name("filepath")
-                .map(|m| m.as_str().to_string())
-                .unwrap_or_else(|| file_name.to_string());
-
-            let infileref = captures.name("infileref").map(|m| m.as_str());
-            let display_text = captures.name("display").map(|m| m.as_str().to_string());
-
-            match infileref {
-                Some(frag) if frag.starts_with('^') => {
-                    // Indexed block link
-                    let index = &frag[1..];
-                    Some(Reference::WikiIndexedBlockLink(
-                        ReferenceData {
-                            reference_text: format!("{}#{}", filepath, frag),
-                            display_text,
-                            range,
-                        },
-                        filepath,
-                        index.to_string(),
-                    ))
-                }
-                Some(heading) => {
-                    // Heading link
-                    Some(Reference::WikiHeadingLink(
-                        ReferenceData {
-                            reference_text: format!("{}#{}", filepath, heading),
-                            display_text,
-                            range,
-                        },
-                        filepath,
-                        heading.to_string(),
-                    ))
-                }
-                None => {
-                    // Plain file link
-                    Some(Reference::WikiFileLink(ReferenceData {
-                        reference_text: filepath,
-                        display_text,
-                        range,
-                    }))
-                }
-            }
-        })
-        .collect()
-}
 
 /// Extract footnote references from a Text node.
 ///
@@ -482,108 +384,6 @@ mod tests {
     }
 
     // ========================================================================
-    // Step 2.2: Wikilink Tests
-    // ========================================================================
-
-    #[test]
-    fn test_wikilink_simple() {
-        let text = "Check out [[other note]]";
-        let refs: Vec<_> = extract_references_from_ast(text, "test");
-
-        assert_eq!(refs.len(), 1);
-        assert!(matches!(&refs[0], Reference::WikiFileLink(_)));
-        assert_eq!(refs[0].data().reference_text, "other note");
-    }
-
-    #[test]
-    fn test_wikilink_with_heading() {
-        let text = "See [[doc#section]]";
-        let refs: Vec<_> = extract_references_from_ast(text, "test");
-
-        assert_eq!(refs.len(), 1);
-        match &refs[0] {
-            Reference::WikiHeadingLink(data, file, heading) => {
-                assert_eq!(data.reference_text, "doc#section");
-                assert_eq!(file, "doc");
-                assert_eq!(heading, "section");
-            }
-            _ => panic!("Expected WikiHeadingLink"),
-        }
-    }
-
-    #[test]
-    fn test_wikilink_with_block() {
-        let text = "Refer to [[notes#^blockid]]";
-        let refs: Vec<_> = extract_references_from_ast(text, "test");
-
-        assert_eq!(refs.len(), 1);
-        match &refs[0] {
-            Reference::WikiIndexedBlockLink(data, file, index) => {
-                assert_eq!(data.reference_text, "notes#^blockid");
-                assert_eq!(file, "notes");
-                assert_eq!(index, "blockid");
-            }
-            _ => panic!("Expected WikiIndexedBlockLink"),
-        }
-    }
-
-    #[test]
-    fn test_wikilink_with_display() {
-        let text = "Read [[other|this document]]";
-        let refs: Vec<_> = extract_references_from_ast(text, "test");
-
-        assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].data().reference_text, "other");
-        assert_eq!(
-            refs[0].data().display_text,
-            Some("this document".to_string())
-        );
-    }
-
-    #[test]
-    fn test_wikilink_heading_with_display() {
-        let text = "See [[doc#section|the section]]";
-        let refs: Vec<_> = extract_references_from_ast(text, "test");
-
-        assert_eq!(refs.len(), 1);
-        match &refs[0] {
-            Reference::WikiHeadingLink(data, file, heading) => {
-                assert_eq!(data.reference_text, "doc#section");
-                assert_eq!(file, "doc");
-                assert_eq!(heading, "section");
-                assert_eq!(data.display_text, Some("the section".to_string()));
-            }
-            _ => panic!("Expected WikiHeadingLink"),
-        }
-    }
-
-    #[test]
-    fn test_wikilink_same_file_heading() {
-        let text = "Jump to [[#local-heading]]";
-        let refs: Vec<_> = extract_references_from_ast(text, "current_file");
-
-        assert_eq!(refs.len(), 1);
-        match &refs[0] {
-            Reference::WikiHeadingLink(data, file, heading) => {
-                assert_eq!(file, "current_file");
-                assert_eq!(heading, "local-heading");
-                assert_eq!(data.reference_text, "current_file#local-heading");
-            }
-            _ => panic!("Expected WikiHeadingLink"),
-        }
-    }
-
-    #[test]
-    fn test_multiple_wikilinks() {
-        let text = "First [[note1]] and second [[note2]]";
-        let refs: Vec<_> = extract_references_from_ast(text, "test");
-
-        assert_eq!(refs.len(), 2);
-        assert_eq!(refs[0].data().reference_text, "note1");
-        assert_eq!(refs[1].data().reference_text, "note2");
-    }
-
-    // ========================================================================
     // Step 2.3: Footnote Tests
     // ========================================================================
 
@@ -673,7 +473,7 @@ mod tests {
         // Note: Link definitions must be at root level, not inside footnote definitions
         let text = r#"# Document
 
-Check [[wiki link]] and [md link](other.md).
+Check [md link](other.md) and [another](doc.md#heading).
 
 See footnote[^1] and reference [ref].
 
@@ -683,16 +483,17 @@ See footnote[^1] and reference [ref].
 "#;
         let refs: Vec<_> = extract_references_from_ast(text, "test");
 
-        // Should have: 1 wikilink, 1 md link, 1 footnote, 1 link ref = 4
+        // Should have: 2 md links, 1 footnote, 1 link ref = 4
         assert_eq!(refs.len(), 4);
 
-        let wiki_count = refs
-            .iter()
-            .filter(|r| matches!(r, Reference::WikiFileLink(_)))
-            .count();
         let md_count = refs
             .iter()
-            .filter(|r| matches!(r, Reference::MDFileLink(_)))
+            .filter(|r| {
+                matches!(
+                    r,
+                    Reference::MDFileLink(_) | Reference::MDHeadingLink(_, _, _)
+                )
+            })
             .count();
         let footnote_count = refs
             .iter()
@@ -703,36 +504,35 @@ See footnote[^1] and reference [ref].
             .filter(|r| matches!(r, Reference::LinkRef(_)))
             .count();
 
-        assert_eq!(wiki_count, 1);
-        assert_eq!(md_count, 1);
+        assert_eq!(md_count, 2);
         assert_eq!(footnote_count, 1);
         assert_eq!(linkref_count, 1);
     }
 
     #[test]
     fn test_range_positions() {
-        let text = "Start [[link]] end";
+        let text = "Start [link](file.md) end";
         let refs: Vec<_> = extract_references_from_ast(text, "test");
 
         assert_eq!(refs.len(), 1);
         let range = &refs[0].data().range;
 
-        // [[link]] starts at position 6 and ends at 14
+        // [link](file.md) starts at position 6 and ends at 21
         assert_eq!(range.start.line, 0);
         assert_eq!(range.start.character, 6);
         assert_eq!(range.end.line, 0);
-        assert_eq!(range.end.character, 14);
+        assert_eq!(range.end.character, 21);
     }
 
     #[test]
     fn test_multiline_range() {
-        let text = "First line\n[[link]] on second line";
+        let text = "First line\n[link](file.md) on second line";
         let refs: Vec<_> = extract_references_from_ast(text, "test");
 
         assert_eq!(refs.len(), 1);
         let range = &refs[0].data().range;
 
-        // [[link]] is on line 1 (0-indexed), starting at character 0
+        // [link](file.md) is on line 1 (0-indexed), starting at character 0
         assert_eq!(range.start.line, 1);
         assert_eq!(range.start.character, 0);
     }

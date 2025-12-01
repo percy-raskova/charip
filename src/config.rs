@@ -21,7 +21,6 @@ pub struct Settings {
     pub tags_in_codeblocks: bool,
     pub references_in_codeblocks: bool,
     pub include_md_extension_md_link: bool,
-    pub include_md_extension_wikilink: bool,
     pub hover: bool,
     pub case_matching: Case,
     pub inlay_hints: bool,
@@ -80,7 +79,6 @@ impl Settings {
             .set_default("tags_in_codeblocks", false)?
             .set_default("references_in_codeblocks", false)?
             .set_default("include_md_extension_md_link", false)?
-            .set_default("include_md_extension_wikilink", false)?
             .set_default("hover", true)?
             .set_default("case_matching", "Smart")?
             .set_default("inlay_hints", true)?
@@ -118,7 +116,6 @@ impl Default for Settings {
             tags_in_codeblocks: false,
             references_in_codeblocks: false,
             include_md_extension_md_link: false,
-            include_md_extension_wikilink: false,
             hover: true,
             case_matching: Case::Smart,
             inlay_hints: false,

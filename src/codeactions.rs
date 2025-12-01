@@ -38,7 +38,7 @@ pub fn code_actions(
         code_action_unresolved
             .flat_map(|(_path, reference)| {
                 match reference {
-                    Reference::WikiFileLink(_data) => {
+                    Reference::MDFileLink(_data) => {
                         let filename = &reference.data().reference_text;
 
                         let mut new_path_buf = vault.root_dir().clone();
@@ -70,8 +70,7 @@ pub fn code_actions(
                             ..Default::default()
                         }))
                     }
-                    Reference::WikiHeadingLink(_data, link_path, heading) => {
-
+                    Reference::MDHeadingLink(_data, link_path, heading) => {
                         let mut new_path_buf = vault.root_dir().clone();
                         if filename_is_formatted(settings, link_path) {
                             new_path_buf.push(&settings.daily_notes_folder);
@@ -87,62 +86,56 @@ pub fn code_actions(
 
                         let length = match file {
                             Some(file) => file.lines().len(),
-                            None => 0
+                            None => 0,
                         };
-
 
                         let new_text = match file {
                             Some(..) => format!("\n\n# {}", heading),
-                            None => format!("# {}", heading)
+                            None => format!("# {}", heading),
                         }; // move this calculation to the vault somehow
-
 
                         Some(CodeActionOrCommand::CodeAction(CodeAction {
                             title: format!(
                                 "Append Heading \"{}\" to file {}.md, creating it if it doesn't exist",
-                                heading,
-                                link_path
+                                heading, link_path
                             ),
-                            edit: Some(WorkspaceEdit{
+                            edit: Some(WorkspaceEdit {
                                 document_changes: Some(DocumentChanges::Operations(vec![
                                     DocumentChangeOperation::Op(ResourceOp::Create(CreateFile {
                                         uri: new_path.clone(),
                                         annotation_id: None,
                                         options: Some(CreateFileOptions {
                                             ignore_if_exists: Some(true),
-                                            overwrite: Some(false)
-                                        })
+                                            overwrite: Some(false),
+                                        }),
                                     })),
-                                    DocumentChangeOperation::Edit(TextDocumentEdit{
-                                        text_document: OptionalVersionedTextDocumentIdentifier{
+                                    DocumentChangeOperation::Edit(TextDocumentEdit {
+                                        text_document: OptionalVersionedTextDocumentIdentifier {
                                             uri: new_path,
-                                            version: None
+                                            version: None,
                                         },
-                                        edits: vec![
-                                            OneOf::Left(TextEdit{
-                                                new_text,
-                                                range: Range {
-                                                    start: Position {
-                                                        line: (length + 1) as u32,
-                                                        character: 0
-                                                    },
-                                                    end: Position {
-                                                        line: length as u32,
-                                                        character: 0
-                                                    }
-                                                }
-                                            })
-                                        ]
-                                    })
+                                        edits: vec![OneOf::Left(TextEdit {
+                                            new_text,
+                                            range: Range {
+                                                start: Position {
+                                                    line: (length + 1) as u32,
+                                                    character: 0,
+                                                },
+                                                end: Position {
+                                                    line: length as u32,
+                                                    character: 0,
+                                                },
+                                            },
+                                        })],
+                                    }),
                                 ])),
                                 ..Default::default()
                             }),
                             ..Default::default()
                         }))
                     }
-                    _ => None
+                    _ => None,
                 }
-
             })
             .collect(),
     )

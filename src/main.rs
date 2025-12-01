@@ -731,7 +731,7 @@ impl LanguageServer for Backend {
                             && range.end.line <= params.range.end.line
                     })
                     .flat_map(|(ref_path, reference)| match reference {
-                        Reference::MDIndexedBlockLink(..) | Reference::WikiIndexedBlockLink(..)
+                        Reference::MDIndexedBlockLink(..)
                             if vault
                                 .select_line(ref_path, reference.data().range.start.line as isize)
                                 .and_then(|line| {

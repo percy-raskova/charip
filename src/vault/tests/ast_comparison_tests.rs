@@ -67,95 +67,6 @@ fn compare_refs(regex_refs: &[Reference], ast_refs: &[Reference]) -> bool {
 }
 
 // ============================================================================
-// Simple Wikilink Tests
-// ============================================================================
-
-#[test]
-fn test_ast_matches_regex_simple_wikilink() {
-    let text = "Here is a [[link]]";
-    let file_name = "test";
-
-    let mut regex_refs: Vec<_> = filter_tags(Reference::new(text, file_name).collect());
-    let mut ast_refs: Vec<_> = extract_references_from_ast(text, file_name);
-
-    sort_refs(&mut regex_refs);
-    sort_refs(&mut ast_refs);
-
-    assert!(
-        compare_refs(&regex_refs, &ast_refs),
-        "Simple wikilink should match"
-    );
-}
-
-#[test]
-fn test_ast_matches_regex_wikilink_with_display() {
-    let text = "Check [[file|display text]]";
-    let file_name = "test";
-
-    let mut regex_refs: Vec<_> = filter_tags(Reference::new(text, file_name).collect());
-    let mut ast_refs: Vec<_> = extract_references_from_ast(text, file_name);
-
-    sort_refs(&mut regex_refs);
-    sort_refs(&mut ast_refs);
-
-    assert!(
-        compare_refs(&regex_refs, &ast_refs),
-        "Wikilink with display text should match"
-    );
-}
-
-#[test]
-fn test_ast_matches_regex_wikilink_with_heading() {
-    let text = "See [[file#heading]]";
-    let file_name = "test";
-
-    let mut regex_refs: Vec<_> = filter_tags(Reference::new(text, file_name).collect());
-    let mut ast_refs: Vec<_> = extract_references_from_ast(text, file_name);
-
-    sort_refs(&mut regex_refs);
-    sort_refs(&mut ast_refs);
-
-    assert!(
-        compare_refs(&regex_refs, &ast_refs),
-        "Wikilink with heading should match"
-    );
-}
-
-#[test]
-fn test_ast_matches_regex_wikilink_with_block() {
-    let text = "Refer to [[notes#^blockid]]";
-    let file_name = "test";
-
-    let mut regex_refs: Vec<_> = filter_tags(Reference::new(text, file_name).collect());
-    let mut ast_refs: Vec<_> = extract_references_from_ast(text, file_name);
-
-    sort_refs(&mut regex_refs);
-    sort_refs(&mut ast_refs);
-
-    assert!(
-        compare_refs(&regex_refs, &ast_refs),
-        "Wikilink with block ref should match"
-    );
-}
-
-#[test]
-fn test_ast_matches_regex_multiple_wikilinks() {
-    let text = "First [[note1]] and second [[note2]] and third [[note3]]";
-    let file_name = "test";
-
-    let mut regex_refs: Vec<_> = filter_tags(Reference::new(text, file_name).collect());
-    let mut ast_refs: Vec<_> = extract_references_from_ast(text, file_name);
-
-    sort_refs(&mut regex_refs);
-    sort_refs(&mut ast_refs);
-
-    assert!(
-        compare_refs(&regex_refs, &ast_refs),
-        "Multiple wikilinks should match"
-    );
-}
-
-// ============================================================================
 // MD Link Tests
 // ============================================================================
 
@@ -355,27 +266,10 @@ fn test_ast_matches_regex_skip_http() {
 // ============================================================================
 
 #[test]
-fn test_ast_matches_regex_mixed_wikilinks_and_md_links() {
-    let text = "Check [[wiki link]] and [md link](other.md).";
-    let file_name = "test";
-
-    let mut regex_refs: Vec<_> = filter_tags(Reference::new(text, file_name).collect());
-    let mut ast_refs: Vec<_> = extract_references_from_ast(text, file_name);
-
-    sort_refs(&mut regex_refs);
-    sort_refs(&mut ast_refs);
-
-    assert!(
-        compare_refs(&regex_refs, &ast_refs),
-        "Mixed wikilinks and MD links should match"
-    );
-}
-
-#[test]
 fn test_ast_matches_regex_complex_document() {
     let text = r#"# Document
 
-Check [[wiki link]] and [md link](other.md).
+Check [md link](other.md) and [another](doc.md#section).
 
 See footnote[^1] and reference [ref].
 
@@ -399,7 +293,7 @@ See footnote[^1] and reference [ref].
 
 #[test]
 fn test_ast_matches_regex_multiline_content() {
-    let text = "First line\n[[link]] on second line\n[md](file.md) on third";
+    let text = "First line\n[link](other.md) on second line\n[md](file.md) on third";
     let file_name = "test";
 
     let mut regex_refs: Vec<_> = filter_tags(Reference::new(text, file_name).collect());
@@ -443,23 +337,6 @@ fn test_ast_matches_regex_no_references() {
 }
 
 #[test]
-fn test_ast_matches_regex_same_file_heading() {
-    let text = "Jump to [[#local-heading]]";
-    let file_name = "current_file";
-
-    let mut regex_refs: Vec<_> = filter_tags(Reference::new(text, file_name).collect());
-    let mut ast_refs: Vec<_> = extract_references_from_ast(text, file_name);
-
-    sort_refs(&mut regex_refs);
-    sort_refs(&mut ast_refs);
-
-    assert!(
-        compare_refs(&regex_refs, &ast_refs),
-        "Same-file heading link should match"
-    );
-}
-
-#[test]
 fn test_ast_matches_regex_url_encoded() {
     let text = "[doc](my%20file.md)";
     let file_name = "test";
@@ -483,7 +360,7 @@ fn test_ast_matches_regex_url_encoded() {
 #[test]
 fn test_reference_new_ast_api() {
     // Test that Reference::new_ast() works identically to extract_references_from_ast()
-    let text = "Check [[wiki link]] and [md link](other.md).";
+    let text = "Check [md link](other.md) and [another](docs/readme.md#intro).";
     let file_name = "test";
 
     let api_refs: Vec<_> = Reference::new_ast(text, file_name).collect();
@@ -501,7 +378,7 @@ fn test_reference_new_ast_vs_regex() {
     // for non-tag references
     let text = r#"# Document
 
-Check [[wiki link]] and [md link](other.md).
+Check [md link](other.md) and [another](doc.md#section).
 
 See footnote[^1] and reference [ref].
 

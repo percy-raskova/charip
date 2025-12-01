@@ -335,30 +335,19 @@ impl Vault {
                         !resolved_referenceables_refnames.contains(&reference.data().reference_text)
                     })
                     .flat_map(|(_, reference)| match reference {
-                        Reference::WikiFileLink(data) | Reference::MDFileLink(data) => {
+                        Reference::MDFileLink(data) => {
                             let mut path = self.root_dir().clone();
                             path.push(&reference.data().reference_text);
 
                             Some(Referenceable::UnresovledFile(path, &data.reference_text))
-
-                            // match data.reference_text.chars().collect_vec().as_slice() {
-
-                            //     [..,'.','m','d'] =>
-                            //     ['.', '/', rest @ ..]
-                            //     | ['/', rest @ ..]
-                            //     | rest if !rest.contains(&'.') => Some(Referenceable::UnresovledFile(path, &data.reference_text)),
-                            //     _ => None
-                            // }
                         }
-                        Reference::WikiHeadingLink(_data, end_path, heading)
-                        | Reference::MDHeadingLink(_data, end_path, heading) => {
+                        Reference::MDHeadingLink(_data, end_path, heading) => {
                             let mut path = self.root_dir().clone();
                             path.push(end_path);
 
                             Some(Referenceable::UnresolvedHeading(path, end_path, heading))
                         }
-                        Reference::WikiIndexedBlockLink(_data, end_path, index)
-                        | Reference::MDIndexedBlockLink(_data, end_path, index) => {
+                        Reference::MDIndexedBlockLink(_data, end_path, index) => {
                             let mut path = self.root_dir().clone();
                             path.push(end_path);
 
@@ -597,6 +586,18 @@ impl MDFile {
             .expect("file should have file stem")
             .to_str()
             .unwrap_or_default();
+        #[cfg(feature = "ast_parsing")]
+        let links = match context {
+            Settings {
+                references_in_codeblocks: false,
+                ..
+            } => Reference::new_ast(text, file_name)
+                .filter(|it| !code_blocks.iter().any(|codeblock| codeblock.includes(it)))
+                .collect_vec(),
+            _ => Reference::new_ast(text, file_name).collect_vec(),
+        };
+
+        #[cfg(not(feature = "ast_parsing"))]
         let links = match context {
             Settings {
                 references_in_codeblocks: false,
@@ -705,9 +706,6 @@ impl Hash for Reference {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Reference {
     Tag(ReferenceData),
-    WikiFileLink(ReferenceData),
-    WikiHeadingLink(ReferenceData, File, Specialref),
-    WikiIndexedBlockLink(ReferenceData, File, Specialref),
     MDFileLink(ReferenceData),
     MDHeadingLink(ReferenceData, File, Specialref),
     MDIndexedBlockLink(ReferenceData, File, Specialref),
@@ -724,7 +722,7 @@ impl Deref for Reference {
 
 impl Default for Reference {
     fn default() -> Self {
-        WikiFileLink(ReferenceData::default())
+        MDFileLink(ReferenceData::default())
     }
 }
 
@@ -739,9 +737,6 @@ impl Reference {
     pub fn data(&self) -> &ReferenceData {
         match &self {
             Tag(data, ..) => data,
-            WikiFileLink(data, ..) => data,
-            WikiHeadingLink(data, ..) => data,
-            WikiIndexedBlockLink(data, ..) => data,
             Footnote(data) => data,
             MDFileLink(data, ..) => data,
             MDHeadingLink(data, ..) => data,
@@ -753,9 +748,6 @@ impl Reference {
     pub fn matches_type(&self, other: &Reference) -> bool {
         match &other {
             Tag(..) => matches!(self, Tag(..)),
-            WikiFileLink(..) => matches!(self, WikiFileLink(..)),
-            WikiHeadingLink(..) => matches!(self, WikiHeadingLink(..)),
-            WikiIndexedBlockLink(..) => matches!(self, WikiIndexedBlockLink(..)),
             Footnote(..) => matches!(self, Footnote(..)),
             MDFileLink(..) => matches!(self, MDFileLink(..)),
             MDHeadingLink(..) => matches!(self, MDHeadingLink(..)),
@@ -765,25 +757,6 @@ impl Reference {
     }
 
     pub fn new<'a>(text: &'a str, file_name: &'a str) -> impl Iterator<Item = Reference> + 'a {
-        static WIKI_LINK_RE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\[\[(?<filepath>[^\[\]\|\.\#]+)?(\#(?<infileref>[^\[\]\.\|]+))?(?<ending>\.[^\# <>]+)?(\|(?<display>[^\[\]\.\|]+))?\]\]")
-
-                .unwrap()
-        }); // A [[link]] that does not have any [ or ] in it
-
-        let wiki_links = WIKI_LINK_RE
-            .captures_iter(text)
-            .filter(|captures| {
-                matches!(
-                    captures.name("ending").map(|ending| ending.as_str()),
-                    Some(".md") | None
-                )
-            })
-            .flat_map(RegexTuple::new)
-            .flat_map(|regextuple| {
-                generic_link_constructor::<WikiReferenceConstructor>(text, file_name, regextuple)
-            });
-
         static MD_LINK_RE: Lazy<Regex> = Lazy::new(|| {
             Regex::new(r"\[(?<display>[^\[\]\.]*?)\]\(<?(?<filepath>(\.?\/)?[^\[\]\|\.\#<>]+?)?(?<ending>\.[^\# <>]+?)?(\#(?<infileref>[^\[\]\.\|<>]+?))?>?\)")
                 .expect("MD Link Not Constructing")
@@ -865,9 +838,8 @@ impl Reference {
             vec![]
         };
 
-        wiki_links
+        md_links
             .into_iter()
-            .chain(md_links)
             .chain(tags)
             .chain(footnote_references)
             .chain(link_ref_references)
@@ -897,34 +869,25 @@ impl Reference {
     ) -> bool {
         let text = &self.data().reference_text;
         match referenceable {
-            &Referenceable::Tag(_, _) => {
-                match self {
-                    Tag(..) => {
-                        referenceable
-                            .get_refname(root_dir)
-                            .map(|thing| thing.to_string())
-                            == Some(text.to_string())
-                    }
-
-                    WikiFileLink(_) => false,
-                    WikiHeadingLink(_, _, _) => false,
-                    WikiIndexedBlockLink(_, _, _) => false,
-                    MDFileLink(_) => false,
-                    MDHeadingLink(_, _, _) => false,
-                    MDIndexedBlockLink(_, _, _) => false,
-                    Footnote(_) => false,
-                    LinkRef(_) => false, // (no I don't write all of these by hand; I use rust-analyzers code action; I do this because when I add new item to the Reference enum, I want workspace errors everywhere relevant)
+            &Referenceable::Tag(_, _) => match self {
+                Tag(..) => {
+                    referenceable
+                        .get_refname(root_dir)
+                        .map(|thing| thing.to_string())
+                        == Some(text.to_string())
                 }
-            }
+                MDFileLink(_) => false,
+                MDHeadingLink(_, _, _) => false,
+                MDIndexedBlockLink(_, _, _) => false,
+                Footnote(_) => false,
+                LinkRef(_) => false,
+            },
             &Referenceable::Footnote(path, _footnote) => match self {
                 Footnote(..) => {
                     referenceable.get_refname(root_dir).as_deref() == Some(text)
                         && path.as_path() == file_path
                 }
                 Tag(_) => false,
-                WikiFileLink(_) => false,
-                WikiHeadingLink(_, _, _) => false,
-                WikiIndexedBlockLink(_, _, _) => false,
                 MDFileLink(_) => false,
                 MDHeadingLink(_, _, _) => false,
                 MDIndexedBlockLink(_, _, _) => false,
@@ -934,14 +897,8 @@ impl Reference {
                 MDFileLink(ReferenceData {
                     reference_text: file_ref_text,
                     ..
-                })
-                | WikiFileLink(ReferenceData {
-                    reference_text: file_ref_text,
-                    ..
                 }) => matches_path_or_file(file_ref_text, referenceable.get_refname(root_dir)),
                 Tag(_) => false,
-                WikiHeadingLink(_, _, _) => false,
-                WikiIndexedBlockLink(_, _, _) => false,
                 MDHeadingLink(_, _, _) => false,
                 MDIndexedBlockLink(_, _, _) => false,
                 Footnote(_) => false,
@@ -962,24 +919,18 @@ impl Reference {
                 },
             )
             | &Referenceable::UnresovledIndexedBlock(.., infile_ref) => match self {
-                WikiHeadingLink(.., file_ref_text, link_infile_ref)
-                | WikiIndexedBlockLink(.., file_ref_text, link_infile_ref)
-                | MDHeadingLink(.., file_ref_text, link_infile_ref)
+                MDHeadingLink(.., file_ref_text, link_infile_ref)
                 | MDIndexedBlockLink(.., file_ref_text, link_infile_ref) => {
                     matches_path_or_file(file_ref_text, referenceable.get_refname(root_dir))
                         && link_infile_ref.to_lowercase() == infile_ref.to_lowercase()
                 }
                 Tag(_) => false,
-                WikiFileLink(_) => false,
                 MDFileLink(_) => false,
                 Footnote(_) => false,
                 LinkRef(_) => false,
             },
             Referenceable::LinkRefDef(path, _link_ref) => match self {
                 Tag(_) => false,
-                WikiFileLink(_) => false,
-                WikiHeadingLink(_, _, _) => false,
-                WikiIndexedBlockLink(_, _, _) => false,
                 MDFileLink(_) => false,
                 MDHeadingLink(_, _, _) => false,
                 MDIndexedBlockLink(_, _, _) => false,
@@ -1029,20 +980,7 @@ trait ParseableReferenceConstructor {
     fn new_indexed_block_link(data: ReferenceData, path: &str, index: &str) -> Reference;
 } // TODO: Turn this into a macro
 
-struct WikiReferenceConstructor;
 struct MDReferenceConstructor;
-
-impl ParseableReferenceConstructor for WikiReferenceConstructor {
-    fn new_heading(data: ReferenceData, path: &str, heading: &str) -> Reference {
-        Reference::WikiHeadingLink(data, path.into(), heading.into())
-    }
-    fn new_file_link(data: ReferenceData) -> Reference {
-        Reference::WikiFileLink(data)
-    }
-    fn new_indexed_block_link(data: ReferenceData, path: &str, index: &str) -> Reference {
-        Reference::WikiIndexedBlockLink(data, path.into(), index.into())
-    }
-}
 
 impl ParseableReferenceConstructor for MDReferenceConstructor {
     fn new_heading(data: ReferenceData, path: &str, heading: &str) -> Reference {
@@ -1360,21 +1298,12 @@ impl Referenceable<'_> {
                 }
                 MDFileLink(..) => false,
                 Tag(_) => false,
-                WikiFileLink(_) => false,
-                WikiHeadingLink(_, _, _) => false,
-                WikiIndexedBlockLink(_, _, _) => false,
                 MDHeadingLink(_, _, _) => false,
                 MDIndexedBlockLink(_, _, _) => false,
                 LinkRef(_) => false,
             },
             Referenceable::File(..) | Referenceable::UnresovledFile(..) => match reference {
-                WikiFileLink(ReferenceData {
-                    reference_text: file_ref_text,
-                    ..
-                })
-                | WikiHeadingLink(.., file_ref_text, _)
-                | WikiIndexedBlockLink(.., file_ref_text, _)
-                | MDFileLink(ReferenceData {
+                MDFileLink(ReferenceData {
                     reference_text: file_ref_text,
                     ..
                 })
