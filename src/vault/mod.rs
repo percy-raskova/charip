@@ -353,9 +353,10 @@ impl Vault {
 
                             Some(Referenceable::UnresovledIndexedBlock(path, end_path, index))
                         }
-                        Reference::Tag(..) | Reference::Footnote(..) | Reference::LinkRef(..) => {
-                            None
-                        }
+                        Reference::Tag(..)
+                        | Reference::Footnote(..)
+                        | Reference::LinkRef(..)
+                        | Reference::MystRole(..) => None,
                     })
                     .collect();
 
@@ -509,6 +510,12 @@ impl Vault {
             Referenceable::UnresovledFile(_, _) => None,
             Referenceable::UnresolvedHeading(_, _, _) => None,
             Referenceable::UnresovledIndexedBlock(_, _, _) => None,
+            Referenceable::MystAnchor(path, symbol) => {
+                // Show the line where the anchor is defined
+                self.select_line(path, symbol.line as isize)
+                    .map(String::from_iter)
+                    .map(Into::into)
+            }
         }
     }
 
@@ -645,7 +652,7 @@ impl MDFile {
             link_reference_definitions,
             metadata: _,
             codeblocks: _,
-            myst_symbols: _,
+            myst_symbols,
         } = self;
 
         iter::once(Referenceable::File(&self.path, self))
@@ -670,6 +677,12 @@ impl MDFile {
                     .iter()
                     .map(|link_ref| Referenceable::LinkRefDef(&self.path, link_ref)),
             )
+            .chain(
+                myst_symbols
+                    .iter()
+                    .filter(|s| s.kind == MystSymbolKind::Anchor)
+                    .map(|anchor| Referenceable::MystAnchor(&self.path, anchor)),
+            )
             .collect()
     }
 }
@@ -691,6 +704,18 @@ impl Hash for Reference {
     }
 }
 
+/// MyST role kind for inline references like {ref}`target` or {doc}`path`
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+pub enum MystRoleKind {
+    Ref,      // {ref}`target` - cross-reference to anchor
+    NumRef,   // {numref}`Figure %s <target>` - numbered reference
+    Eq,       // {eq}`equation-label` - equation reference
+    Doc,      // {doc}`/path/to/file` - document link
+    Download, // {download}`file.zip` - downloadable file
+    Term,     // {term}`glossary-term` - glossary reference
+    Abbr,     // {abbr}`MyST (Markedly Structured Text)` - abbreviation
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Reference {
     Tag(ReferenceData),
@@ -699,6 +724,9 @@ pub enum Reference {
     MDIndexedBlockLink(ReferenceData, File, Specialref),
     Footnote(ReferenceData),
     LinkRef(ReferenceData),
+    /// MyST role reference: {role}`target`
+    /// Fields: (data, role_kind, target)
+    MystRole(ReferenceData, MystRoleKind, String),
 }
 
 impl Deref for Reference {
@@ -730,6 +758,7 @@ impl Reference {
             MDHeadingLink(data, ..) => data,
             MDIndexedBlockLink(data, ..) => data,
             LinkRef(data, ..) => data,
+            MystRole(data, ..) => data,
         }
     }
 
@@ -741,6 +770,7 @@ impl Reference {
             MDHeadingLink(..) => matches!(self, MDHeadingLink(..)),
             MDIndexedBlockLink(..) => matches!(self, MDIndexedBlockLink(..)),
             LinkRef(..) => matches!(self, LinkRef(..)),
+            MystRole(..) => matches!(self, MystRole(..)),
         }
     }
 
@@ -780,6 +810,7 @@ impl Reference {
                 MDIndexedBlockLink(_, _, _) => false,
                 Footnote(_) => false,
                 LinkRef(_) => false,
+                MystRole(..) => false,
             },
             &Referenceable::Footnote(path, _footnote) => match self {
                 Footnote(..) => {
@@ -791,17 +822,23 @@ impl Reference {
                 MDHeadingLink(_, _, _) => false,
                 MDIndexedBlockLink(_, _, _) => false,
                 LinkRef(_) => false,
+                MystRole(..) => false,
             },
             &Referenceable::File(..) | &Referenceable::UnresovledFile(..) => match self {
                 MDFileLink(ReferenceData {
                     reference_text: file_ref_text,
                     ..
                 }) => matches_path_or_file(file_ref_text, referenceable.get_refname(root_dir)),
+                // {doc}`path` role references files
+                MystRole(_, MystRoleKind::Doc, target) => {
+                    matches_path_or_file(target, referenceable.get_refname(root_dir))
+                }
                 Tag(_) => false,
                 MDHeadingLink(_, _, _) => false,
                 MDIndexedBlockLink(_, _, _) => false,
                 Footnote(_) => false,
                 LinkRef(_) => false,
+                MystRole(..) => false, // Other role types don't reference files
             },
             &Referenceable::Heading(
                 ..,
@@ -823,10 +860,15 @@ impl Reference {
                     matches_path_or_file(file_ref_text, referenceable.get_refname(root_dir))
                         && link_infile_ref.to_lowercase() == infile_ref.to_lowercase()
                 }
+                // {ref}`target` can reference headings
+                MystRole(_, MystRoleKind::Ref, target) => {
+                    target.to_lowercase() == infile_ref.to_lowercase()
+                }
                 Tag(_) => false,
                 MDFileLink(_) => false,
                 Footnote(_) => false,
                 LinkRef(_) => false,
+                MystRole(..) => false, // Other role types don't reference headings
             },
             Referenceable::LinkRefDef(path, _link_ref) => match self {
                 Tag(_) => false,
@@ -842,6 +884,21 @@ impl Reference {
                             .map(|string| string.to_lowercase())
                         && file_path == *path
                 }
+                MystRole(..) => false,
+            },
+            Referenceable::MystAnchor(_, symbol) => match self {
+                // {ref}`target` and {numref}`target` roles can reference MyST anchors
+                MystRole(_, MystRoleKind::Ref, target)
+                | MystRole(_, MystRoleKind::NumRef, target) => {
+                    target.to_lowercase() == symbol.name.to_lowercase()
+                }
+                Tag(_) => false,
+                MDFileLink(_) => false,
+                MDHeadingLink(_, _, _) => false,
+                MDIndexedBlockLink(_, _, _) => false,
+                Footnote(_) => false,
+                LinkRef(_) => false,
+                MystRole(..) => false, // Other role types don't reference anchors
             },
         }
     }
@@ -1001,6 +1058,8 @@ pub enum Referenceable<'a> {
     /// full path, link path, index (without ^)
     UnresovledIndexedBlock(PathBuf, &'a String, &'a String),
     LinkRefDef(&'a PathBuf, &'a MDLinkReferenceDefinition),
+    /// MyST anchor target: `(my-target)=`
+    MystAnchor(&'a PathBuf, &'a MystSymbol),
 }
 impl Referenceable<'_> {
     /// Gets the generic reference name for a referenceable. This will not include any display text. If trying to determine if text is a reference of a particular referenceable, use the `is_reference` function
@@ -1069,6 +1128,11 @@ impl Referenceable<'_> {
                 infile_ref: None,
                 path: None,
             }),
+            Referenceable::MystAnchor(_, symbol) => Some(Refname {
+                full_refname: symbol.name.clone(),
+                infile_ref: Some(symbol.name.clone()),
+                path: None,
+            }),
         }
     }
 
@@ -1099,6 +1163,7 @@ impl Referenceable<'_> {
                 MDHeadingLink(_, _, _) => false,
                 MDIndexedBlockLink(_, _, _) => false,
                 LinkRef(_) => false,
+                MystRole(..) => false,
             },
             Referenceable::File(..) | Referenceable::UnresovledFile(..) => match reference {
                 MDFileLink(ReferenceData {
@@ -1109,9 +1174,14 @@ impl Referenceable<'_> {
                 | MDIndexedBlockLink(.., file_ref_text, _) => {
                     matches_path_or_file(file_ref_text, self.get_refname(root_dir))
                 }
+                // {doc}`path` role references files
+                MystRole(_, MystRoleKind::Doc, target) => {
+                    matches_path_or_file(target, self.get_refname(root_dir))
+                }
                 Tag(_) => false,
                 Footnote(_) => false,
                 LinkRef(_) => false,
+                MystRole(..) => false, // Other role types don't reference files
             },
 
             _ => reference.references(root_dir, reference_path, self),
@@ -1129,6 +1199,7 @@ impl Referenceable<'_> {
             Referenceable::UnresovledFile(path, ..) => path,
             Referenceable::UnresolvedHeading(path, ..) => path,
             Referenceable::LinkRefDef(path, ..) => path,
+            Referenceable::MystAnchor(path, ..) => path,
         }
     }
 
@@ -1143,6 +1214,9 @@ impl Referenceable<'_> {
             Referenceable::UnresovledFile(..)
             | Referenceable::UnresolvedHeading(..)
             | Referenceable::UnresovledIndexedBlock(..) => None,
+            // MystSymbol currently only has line, not full range
+            // TODO: Add range field to MystSymbol for proper LSP navigation
+            Referenceable::MystAnchor(_, _symbol) => None,
         }
     }
 

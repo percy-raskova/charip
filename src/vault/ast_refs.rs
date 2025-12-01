@@ -17,7 +17,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use ropey::Rope;
 
-use super::{MyRange, Reference, ReferenceData};
+use super::{MyRange, MystRoleKind, Reference, ReferenceData};
 
 /// Extract all references from markdown text using AST parsing.
 ///
@@ -96,6 +96,12 @@ fn traverse_node(
                     refs.push(reference);
                 }
             }
+        }
+        Node::Paragraph(para) => {
+            // Extract MyST roles from paragraph children
+            // MyST roles like {ref}`target` are parsed as Text + InlineCode sibling pairs
+            let roles = extract_myst_roles_from_siblings(&para.children, rope);
+            refs.extend(roles);
         }
         _ => {}
     }
@@ -288,6 +294,102 @@ fn extract_link_ref(lref: &markdown::mdast::LinkReference, rope: &Rope) -> Optio
         display_text: None,
         range,
     }))
+}
+
+// ============================================================================
+// MyST Role Extraction
+// ============================================================================
+
+/// Regex for detecting Text nodes that end with a MyST role prefix: `{rolename}`
+///
+/// markdown-rs parses `{ref}`target`` as:
+///   Text("...{ref}") + InlineCode("target")
+/// So we need to detect this pattern across sibling nodes.
+static MYST_ROLE_PREFIX_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\{(?<role>[a-zA-Z][a-zA-Z0-9_-]*)\}$").unwrap());
+
+/// Regex for parsing display text with target format: "display text <target>"
+static ROLE_TARGET_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^(?<display>.+?)\s*<(?<target>[^>]+)>$").unwrap());
+
+/// Parse role kind from role name string.
+fn parse_role_kind(role_name: &str) -> Option<MystRoleKind> {
+    match role_name {
+        "ref" => Some(MystRoleKind::Ref),
+        "numref" => Some(MystRoleKind::NumRef),
+        "eq" => Some(MystRoleKind::Eq),
+        "doc" => Some(MystRoleKind::Doc),
+        "download" => Some(MystRoleKind::Download),
+        "term" => Some(MystRoleKind::Term),
+        "abbr" => Some(MystRoleKind::Abbr),
+        _ => None, // Unknown role
+    }
+}
+
+/// Extract MyST role references from paragraph children.
+///
+/// MyST roles like `{ref}`target`` are parsed by markdown-rs as:
+///   Text("{ref}") + InlineCode("target")
+///
+/// We scan sibling nodes to detect this pattern:
+/// - Text ending with `{rolename}` followed by InlineCode
+fn extract_myst_roles_from_siblings(children: &[Node], rope: &Rope) -> Vec<Reference> {
+    let mut roles = Vec::new();
+
+    // Look at pairs: Text + InlineCode
+    for window in children.windows(2) {
+        if let [Node::Text(text_node), Node::InlineCode(code_node)] = window {
+            // Check if text ends with {rolename}
+            if let Some(caps) = MYST_ROLE_PREFIX_RE.captures(&text_node.value) {
+                let role_name = caps.name("role").map(|m| m.as_str()).unwrap_or("");
+
+                if let Some(role_kind) = parse_role_kind(role_name) {
+                    let content = &code_node.value;
+
+                    // Parse content for optional display text: "display <target>" or just "target"
+                    let (target, display_text) =
+                        if let Some(target_caps) = ROLE_TARGET_RE.captures(content) {
+                            let display = target_caps
+                                .name("display")
+                                .map(|m| m.as_str().trim().to_string());
+                            let target = target_caps
+                                .name("target")
+                                .map(|m| m.as_str().to_string())
+                                .unwrap_or_else(|| content.to_string());
+                            (target, display)
+                        } else {
+                            (content.to_string(), None)
+                        };
+
+                    // Calculate range: from {role} start to InlineCode end
+                    // The role prefix is at the end of text_node
+                    let role_match = caps.get(0).unwrap();
+                    let text_pos = text_node.position.as_ref();
+                    let code_pos = code_node.position.as_ref();
+
+                    if let (Some(text_pos), Some(code_pos)) = (text_pos, code_pos) {
+                        // Start: text node start offset + where {role} begins in text
+                        let start = text_pos.start.offset + role_match.start();
+                        // End: InlineCode end (includes closing backtick)
+                        let end = code_pos.end.offset;
+                        let range = MyRange::from_range(rope, start..end);
+
+                        roles.push(Reference::MystRole(
+                            ReferenceData {
+                                reference_text: target.clone(),
+                                display_text,
+                                range,
+                            },
+                            role_kind,
+                            target,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    roles
 }
 
 #[cfg(test)]
@@ -595,5 +697,179 @@ See footnote[^1] and reference [ref].
         let text = "# Just a heading\n\nSome plain text without any links.";
         let refs: Vec<_> = extract_references_from_ast(text, "test");
         assert!(refs.is_empty());
+    }
+
+    // ========================================================================
+    // MyST Role Extraction Tests
+    // ========================================================================
+
+    #[test]
+    fn test_myst_ref_role_extraction() {
+        let text = "See {ref}`my-section` for details.";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        match &refs[0] {
+            Reference::MystRole(data, kind, target) => {
+                assert_eq!(*kind, MystRoleKind::Ref);
+                assert_eq!(target, "my-section");
+                assert_eq!(data.reference_text, "my-section");
+                assert!(data.display_text.is_none());
+            }
+            _ => panic!("Expected MystRole, got {:?}", refs[0]),
+        }
+    }
+
+    #[test]
+    fn test_myst_doc_role_extraction() {
+        let text = "Read {doc}`./other-file` next.";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        match &refs[0] {
+            Reference::MystRole(data, kind, target) => {
+                assert_eq!(*kind, MystRoleKind::Doc);
+                assert_eq!(target, "./other-file");
+                assert_eq!(data.reference_text, "./other-file");
+            }
+            _ => panic!("Expected MystRole, got {:?}", refs[0]),
+        }
+    }
+
+    #[test]
+    fn test_myst_role_with_display_text() {
+        let text = "See {ref}`the section <my-target>` here.";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        match &refs[0] {
+            Reference::MystRole(data, kind, target) => {
+                assert_eq!(*kind, MystRoleKind::Ref);
+                assert_eq!(target, "my-target");
+                assert_eq!(data.reference_text, "my-target");
+                assert_eq!(data.display_text, Some("the section".to_string()));
+            }
+            _ => panic!("Expected MystRole, got {:?}", refs[0]),
+        }
+    }
+
+    #[test]
+    fn test_myst_term_role_extraction() {
+        let text = "The {term}`dialectical materialism` is important.";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        match &refs[0] {
+            Reference::MystRole(_, kind, target) => {
+                assert_eq!(*kind, MystRoleKind::Term);
+                assert_eq!(target, "dialectical materialism");
+            }
+            _ => panic!("Expected MystRole"),
+        }
+    }
+
+    #[test]
+    fn test_myst_multiple_roles() {
+        let text = "See {ref}`section-a` and {doc}`./file-b` for more info.";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 2);
+
+        let role_kinds: Vec<_> = refs
+            .iter()
+            .filter_map(|r| match r {
+                Reference::MystRole(_, kind, _) => Some(*kind),
+                _ => None,
+            })
+            .collect();
+
+        assert!(role_kinds.contains(&MystRoleKind::Ref));
+        assert!(role_kinds.contains(&MystRoleKind::Doc));
+    }
+
+    #[test]
+    fn test_myst_all_role_types() {
+        let text = r#"
+{ref}`target1`
+{numref}`Figure %s <fig-label>`
+{eq}`equation1`
+{doc}`/path/to/doc`
+{download}`file.zip`
+{term}`glossary-term`
+{abbr}`MyST (Markedly Structured Text)`
+"#;
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 7);
+
+        let kinds: Vec<_> = refs
+            .iter()
+            .filter_map(|r| match r {
+                Reference::MystRole(_, kind, _) => Some(*kind),
+                _ => None,
+            })
+            .collect();
+
+        assert!(kinds.contains(&MystRoleKind::Ref));
+        assert!(kinds.contains(&MystRoleKind::NumRef));
+        assert!(kinds.contains(&MystRoleKind::Eq));
+        assert!(kinds.contains(&MystRoleKind::Doc));
+        assert!(kinds.contains(&MystRoleKind::Download));
+        assert!(kinds.contains(&MystRoleKind::Term));
+        assert!(kinds.contains(&MystRoleKind::Abbr));
+    }
+
+    #[test]
+    fn test_myst_unknown_role_ignored() {
+        let text = "Using {unknown}`something` role.";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        // Unknown roles should be ignored
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn test_myst_role_range_position() {
+        let text = "Start {ref}`my-target` end";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        let range = &refs[0].data().range;
+
+        // {ref}`my-target` starts at position 6 and ends at 22
+        assert_eq!(range.start.line, 0);
+        assert_eq!(range.start.character, 6);
+        assert_eq!(range.end.line, 0);
+        assert_eq!(range.end.character, 22);
+    }
+
+    #[test]
+    fn test_myst_mixed_with_other_references() {
+        let text = r#"# Document
+
+Check [md link](other.md) and {ref}`my-section`.
+
+See footnote[^1] too.
+
+[^1]: Footnote text
+"#;
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        let md_count = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::MDFileLink(_)))
+            .count();
+        let role_count = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::MystRole(..)))
+            .count();
+        let footnote_count = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Footnote(_)))
+            .count();
+
+        assert_eq!(md_count, 1);
+        assert_eq!(role_count, 1);
+        assert_eq!(footnote_count, 1);
     }
 }

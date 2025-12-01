@@ -70,7 +70,8 @@ pub fn preview_reference(
     reference: &Reference,
 ) -> Option<MarkupContent> {
     match reference {
-        Footnote(_) | MDFileLink(..) | MDHeadingLink(..) | MDIndexedBlockLink(..) | LinkRef(..) => {
+        Footnote(_) | MDFileLink(..) | MDHeadingLink(..) | MDIndexedBlockLink(..) | LinkRef(..)
+        | MystRole(..) => {
             let referenceables_for_reference =
                 vault.select_referenceables_for_reference(reference, reference_path);
 

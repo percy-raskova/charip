@@ -169,6 +169,7 @@ pub fn rename(vault: &Vault, params: &RenameParams, path: &Path) -> Option<Works
                 Reference::MDFileLink(..) => None,
                 Reference::Footnote(..) => None,
                 Reference::LinkRef(_) => None,
+                Reference::MystRole(..) => None, // MyST role renaming not yet supported
             }
         })
         .map(DocumentChangeOperation::Edit);

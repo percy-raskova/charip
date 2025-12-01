@@ -1,4 +1,5 @@
 use crate::config::Settings;
+use crate::myst_parser::MystSymbolKind;
 use crate::vault::*;
 use std::fs;
 use tempfile::TempDir;
@@ -185,4 +186,76 @@ print("hello")
         names.contains(&"code-block"),
         "Should contain 'code-block' directive"
     );
+}
+
+#[test]
+fn test_myst_anchor_as_referenceable() {
+    let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+    let content = "(my-target)=\n# Section Title\n\nSome content.";
+    fs::write(vault_dir.join("test.md"), content).unwrap();
+
+    let settings = Settings::default();
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+    // Get all referenceables and check MystAnchor is included
+    let referenceables = vault.select_referenceable_nodes(None);
+
+    let anchor_refs: Vec<_> = referenceables
+        .iter()
+        .filter(|r| matches!(r, Referenceable::MystAnchor(..)))
+        .collect();
+
+    assert_eq!(anchor_refs.len(), 1, "Should find 1 MystAnchor referenceable");
+
+    if let Referenceable::MystAnchor(_, symbol) = anchor_refs[0] {
+        assert_eq!(symbol.name, "my-target");
+        assert_eq!(symbol.kind, MystSymbolKind::Anchor);
+    } else {
+        panic!("Expected MystAnchor");
+    }
+}
+
+#[test]
+fn test_myst_ref_role_resolves_to_anchor() {
+    let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+    // File with anchor
+    let content_with_anchor = "(my-section)=\n# My Section\n\nContent here.";
+    fs::write(vault_dir.join("target.md"), content_with_anchor).unwrap();
+
+    // File with {ref} role pointing to that anchor
+    let content_with_ref = "See {ref}`my-section` for more info.";
+    fs::write(vault_dir.join("source.md"), content_with_ref).unwrap();
+
+    let settings = Settings::default();
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+    // Find the MystAnchor referenceable
+    let referenceables = vault.select_referenceable_nodes(None);
+    let anchor = referenceables
+        .iter()
+        .find(|r| matches!(r, Referenceable::MystAnchor(..)))
+        .expect("Should find MystAnchor");
+
+    // Find references to this anchor
+    let refs = vault.select_references_for_referenceable(anchor);
+
+    assert!(refs.is_some(), "Should find references to anchor");
+    let refs = refs.unwrap();
+
+    assert_eq!(refs.len(), 1, "Should find 1 reference to the anchor");
+
+    // Verify it's a MystRole reference
+    let (path, reference) = &refs[0];
+    assert!(path.ends_with("source.md"), "Reference should be from source.md");
+
+    match reference {
+        Reference::MystRole(data, kind, target) => {
+            assert_eq!(*kind, MystRoleKind::Ref);
+            assert_eq!(target, "my-section");
+            assert_eq!(data.reference_text, "my-section");
+        }
+        _ => panic!("Expected MystRole reference, got {:?}", reference),
+    }
 }
