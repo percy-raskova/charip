@@ -158,24 +158,36 @@ pub struct Vault {
 
 /// Methods using vaults data
 impl Vault {
+    /// Generic helper for selecting Vec fields from MDFile with optional path filtering.
+    ///
+    /// If `path` is Some, returns items from that file only.
+    /// If `path` is None, returns items from all files in the vault.
+    fn select_field<'a, T>(
+        &'a self,
+        path: Option<&'a Path>,
+        extractor: impl Fn(&'a MDFile) -> &'a Vec<T>,
+    ) -> Vec<(&'a Path, &'a T)> {
+        match path {
+            Some(path) => self
+                .md_files
+                .get(path)
+                .map(|md| extractor(md))
+                .map(|vec| vec.iter().map(|item| (path, item)).collect())
+                .unwrap_or_default(),
+            None => self
+                .md_files
+                .iter()
+                .flat_map(|(path, md)| extractor(md).iter().map(|item| (path.as_path(), item)))
+                .collect(),
+        }
+    }
+
     /// Select all references ([[link]] or #tag) in a file if path is Some, else all in vault.
     pub fn select_references<'a>(
         &'a self,
         path: Option<&'a Path>,
     ) -> Vec<(&'a Path, &'a Reference)> {
-        match path {
-            Some(path) => self
-                .md_files
-                .get(path)
-                .map(|md| &md.references)
-                .map(|vec| vec.iter().map(|i| (path, i)).collect())
-                .unwrap_or_default(),
-            None => self
-                .md_files
-                .iter()
-                .flat_map(|(path, md)| md.references.iter().map(|link| (path.as_path(), link)))
-                .collect(),
-        }
+        self.select_field(path, |md| &md.references)
     }
 
     /// Select all MyST symbols in a file if path is Some, else all in vault.
@@ -183,21 +195,7 @@ impl Vault {
         &'a self,
         path: Option<&'a Path>,
     ) -> Vec<(&'a Path, &'a MystSymbol)> {
-        match path {
-            Some(path) => self
-                .md_files
-                .get(path)
-                .map(|md| &md.myst_symbols)
-                .map(|vec| vec.iter().map(|s| (path, s)).collect())
-                .unwrap_or_default(),
-            None => self
-                .md_files
-                .iter()
-                .flat_map(|(path, md)| {
-                    md.myst_symbols.iter().map(|s| (path.as_path(), s))
-                })
-                .collect(),
-        }
+        self.select_field(path, |md| &md.myst_symbols)
     }
 
     /// Select MyST directives (```{note}, ```{warning}, etc.) in a file or vault.
