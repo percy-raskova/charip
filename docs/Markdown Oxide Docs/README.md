@@ -1,19 +1,46 @@
+# charip-lsp
 
-**markdown-oxide**: PKM (Personal-Knowledge-Management) Markdown Language Server for your favorite text-editor. 
+A Language Server for MyST (Markedly Structured Text) documents, forked from [markdown-oxide](https://github.com/Feel-ix-343/markdown-oxide).
+
+## About the Name
+
+**Charip** (자립, *ja-rip*) means "self-reliance" or "economic self-sufficiency" in Korean. It is one of the three pillars of the Juche idea, which holds that true independence requires building one's own infrastructure rather than depending on external systems.
+
+This project embodies that principle: rather than adapting to tools built for other purposes, we build tools that serve our specific needs. Revolutionary movements need revolutionary infrastructure—this LSP is one component of that effort, providing intelligence for a personal knowledge system that publishes revolutionary ideas.
+
+## Purpose
+
+**charip-lsp** extends markdown-oxide to support **MyST Markdown**, the extended Markdown syntax used by Sphinx documentation systems. While markdown-oxide targets Obsidian/Logseq PKM workflows with wikilinks, charip-lsp targets:
+
+- MyST directives (```{note}, ```{warning}, ```{toctree})
+- MyST roles ({ref}\`target\`, {doc}\`path\`, {term}\`entry\`)
+- Cross-reference resolution across document trees
+- Sphinx project structure (toctrees, includes)
+
+The immediate use case is providing LSP features for a personal knowledge vault that publishes to a Sphinx website.
+
+## Status
+
+**Phase 1 Complete**: Basic MyST directive and anchor parsing integrated into the vault.
+
+**Phase 2 In Progress**: Graph-based architecture using `petgraph` for cross-file reference resolution.
+
+See `ai-docs/MyST_Implementation_Plan.md` for the full roadmap.
+
+---
+
+# Upstream Documentation (markdown-oxide)
+
+The following documentation is from the upstream project and applies to the base PKM features.
 
 **[Quick Start](#quick-start)**
 
-# Docs
-
-
-Here are some recommended links from our documentation website, <https://oxide.md>
-
 ## Recommended Links
 
-* [What is markdown-oxide?](https://oxide.md/): An overview of our PKM features to help you determine if markdown-oxide is for you
-* [Markdown-oxide getting-started guide](https://oxide.md/index#Getting+Started): A guide to setting up your text editor, configuring the PKM, and using the features.
-* [Features Reference](https://oxide.md/Features+Index): An organized list of all features
-* [Configuration Reference](https://oxide.md/Configuration): Configuration information to reference
+* [What is markdown-oxide?](https://oxide.md/): An overview of the PKM features
+* [Markdown-oxide getting-started guide](https://oxide.md/index#Getting+Started): Editor setup and configuration
+* [Features Reference](https://oxide.md/Features+Index): All features
+* [Configuration Reference](https://oxide.md/Configuration): Configuration options
     + [Default Config File](https://oxide.md/Configuration#Default+Config+File)
 
 # Quick Start

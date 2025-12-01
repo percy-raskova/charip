@@ -1,0 +1,190 @@
+/* charip-lsp documentation theme
+ * Colors inspired by the flag of the DPRK
+ * Blue: #024fa2, Red: #ed1c27, White: #ffffff
+ */
+
+:root {
+  /* Primary blue background */
+  --color-background-primary: #024fa2;
+  --color-background-secondary: #013d7a;
+  --color-background-hover: #01326a;
+  --color-background-border: #ed1c27;
+
+  /* White text */
+  --color-foreground-primary: #ffffff;
+  --color-foreground-secondary: #e0e0e0;
+  --color-foreground-muted: #c0c0c0;
+  --color-foreground-border: #ed1c27;
+
+  /* Red accents */
+  --color-brand-primary: #ed1c27;
+  --color-brand-content: #ff4d4d;
+
+  /* Links */
+  --color-link: #ff6b6b;
+  --color-link--hover: #ffffff;
+
+  /* Sidebar */
+  --color-sidebar-background: #013d7a;
+  --color-sidebar-background-border: #ed1c27;
+  --color-sidebar-brand-text: #ffffff;
+  --color-sidebar-caption-text: #ed1c27;
+  --color-sidebar-link-text: #ffffff;
+  --color-sidebar-link-text--top-level: #ffffff;
+  --color-sidebar-item-background--current: #024fa2;
+  --color-sidebar-item-background--hover: #01326a;
+  --color-sidebar-item-expander-background--hover: #01326a;
+
+  /* Content area */
+  --color-content-foreground: #ffffff;
+  --color-content-wrap-background: #024fa2;
+
+  /* Admonitions */
+  --color-admonition-background: #013d7a;
+  --color-admonition-title-background: #ed1c27;
+  --color-admonition-title: #ffffff;
+
+  /* Code blocks */
+  --color-code-background: #013d7a;
+  --color-code-foreground: #ffffff;
+  --color-inline-code-background: #013d7a;
+
+  /* Tables */
+  --color-table-header-background: #ed1c27;
+  --color-table-border: #ed1c27;
+}
+
+/* Dark mode overrides (same colors for consistency) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background-primary: #024fa2;
+    --color-background-secondary: #013d7a;
+  }
+}
+
+/* Force dark mode variables for Furo */
+body {
+  --color-background-primary: #024fa2;
+  --color-background-secondary: #013d7a;
+}
+
+/* Header styling */
+.sidebar-brand {
+  background: #ed1c27 !important;
+  padding: 1rem;
+}
+
+.sidebar-brand-text {
+  color: #ffffff !important;
+  font-weight: bold;
+}
+
+/* Navigation current item */
+.sidebar-tree .current-page > .reference {
+  background: #ed1c27 !important;
+  color: #ffffff !important;
+  font-weight: bold;
+}
+
+/* Toctree captions */
+.sidebar-tree .caption {
+  color: #ed1c27 !important;
+  border-bottom: 2px solid #ed1c27;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* Main content area */
+.main {
+  background: #024fa2 !important;
+}
+
+.content {
+  background: #024fa2 !important;
+  color: #ffffff !important;
+}
+
+/* Article */
+article {
+  color: #ffffff !important;
+}
+
+article h1, article h2, article h3, article h4, article h5, article h6 {
+  color: #ffffff !important;
+  border-bottom-color: #ed1c27 !important;
+}
+
+/* Admonition boxes */
+.admonition {
+  border-left: 4px solid #ed1c27 !important;
+  background: #013d7a !important;
+}
+
+.admonition > .admonition-title {
+  background: #ed1c27 !important;
+  color: #ffffff !important;
+}
+
+/* Tables */
+table {
+  border: 2px solid #ed1c27 !important;
+}
+
+th {
+  background: #ed1c27 !important;
+  color: #ffffff !important;
+}
+
+td {
+  border-color: #ed1c27 !important;
+  background: #013d7a !important;
+  color: #ffffff !important;
+}
+
+/* Code blocks */
+pre {
+  background: #013d7a !important;
+  border: 1px solid #ed1c27 !important;
+}
+
+code {
+  background: #013d7a !important;
+  color: #ff6b6b !important;
+}
+
+/* Links */
+a {
+  color: #ff6b6b !important;
+}
+
+a:hover {
+  color: #ffffff !important;
+}
+
+/* Search */
+.search input {
+  background: #013d7a !important;
+  border: 1px solid #ed1c27 !important;
+  color: #ffffff !important;
+}
+
+/* Footer */
+footer {
+  background: #013d7a !important;
+  border-top: 2px solid #ed1c27 !important;
+}
+
+/* Definition lists */
+dt {
+  color: #ed1c27 !important;
+  font-weight: bold;
+}
+
+dd {
+  color: #ffffff !important;
+}
+
+/* Horizontal rules */
+hr {
+  border-color: #ed1c27 !important;
+}

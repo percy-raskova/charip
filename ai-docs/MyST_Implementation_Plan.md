@@ -95,18 +95,32 @@ pub type MystWorkspaceGraph = DiGraph<DocumentNode, EdgeKind>;
 ## 6. Progress Log
 
 ### Completed
-*   **Phase 1 (Partial)**:
+*   **Phase 1 (Complete)**:
     *   Swapped `markdown-rs` dependency for `markdown` (micromark).
     *   Created `src/myst_parser.rs` module.
     *   Implemented basic AST traversal to identify MyST Directives (e.g., ````{name}`) from fenced code blocks.
     *   Added unit tests for directive parsing.
+    *   **TDD Integration (2025-11-30)**:
+        *   Added `MystSymbolKind` enum (`Directive`, `Anchor`, `Reference` placeholder).
+        *   Integrated `myst_symbols` into `MDFile` struct.
+        *   Added `select_myst_symbols()` query method to `Vault`.
+        *   Added `Settings::default()` for test infrastructure.
+        *   Added 3 integration tests verifying vault extraction.
+        *   All 58 tests pass.
 
 ### Immediate Next Steps
-1.  **Support MyST Roles**:
-    *   Extend `myst_parser.rs` to identify inline roles (`{role}content`).
-    *   Likely requires a regex pass on `Node::Text` nodes since standard CommonMark parsers treat roles as plain text.
-2.  **Graph Integration (Phase 2 Start)**:
+1.  **Phase 2: Graph Architecture**:
     *   Create a new module `src/graph.rs` (or similar).
     *   Define `MystWorkspaceGraph` using `petgraph`.
     *   Test inserting nodes and edges.
+    *   Refactor `Vault` from HashMap to graph-based storage.
+2.  **Support MyST Roles** (after Phase 2):
+    *   Extend `myst_parser.rs` to identify inline roles (`` {role}`content` ``).
+    *   Requires regex pass on `Node::Text` nodes since CommonMark treats roles as plain text.
+    *   See `Future_Enhancements.md` for reference type priorities.
+
+### Deferred Work
+See `Future_Enhancements.md` for:
+*   Deferred refactorings from TDD cycle
+*   Future MyST reference types to parse
 
