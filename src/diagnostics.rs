@@ -13,7 +13,7 @@ pub fn path_unresolved_references<'a>(
     path: &'a Path,
 ) -> Option<Vec<(&'a Path, &'a Reference)>> {
     let referenceables = vault.select_referenceable_nodes(None);
-    let pathreferences = vault.select_references(Some(path))?;
+    let pathreferences = vault.select_references(Some(path));
 
     let unresolved = pathreferences
         .into_par_iter()
@@ -47,7 +47,7 @@ pub fn diagnostics(
 
     let unresolved = path_unresolved_references(vault, path)?;
 
-    let allreferences = vault.select_references(None)?;
+    let allreferences = vault.select_references(None);
 
     let diags: Vec<Diagnostic> = unresolved
         .into_par_iter()

@@ -16,7 +16,7 @@ pub fn semantic_tokens_full(
         return None;
     }
 
-    let references_in_file = vault.select_references(Some(path))?;
+    let references_in_file = vault.select_references(Some(path));
 
     let path_unresolved: Option<HashSet<_>> =
         path_unresolved_references(vault, path).map(|thing| {

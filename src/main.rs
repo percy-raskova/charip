@@ -721,9 +721,7 @@ impl LanguageServer for Backend {
                 }
 
                 let path = params_path!(params)?;
-                let Some(references) = vault.select_references(Some(&path)) else {
-                    return Ok(None);
-                };
+                let references = vault.select_references(Some(&path));
 
                 let embed_block_references_in_range = references
                     .into_iter()

@@ -158,23 +158,23 @@ pub struct Vault {
 
 /// Methods using vaults data
 impl Vault {
-    /// Select all references ([[link]] or #tag) in a file if path is some, else select all references in the vault.
+    /// Select all references ([[link]] or #tag) in a file if path is Some, else all in vault.
     pub fn select_references<'a>(
         &'a self,
         path: Option<&'a Path>,
-    ) -> Option<Vec<(&'a Path, &'a Reference)>> {
+    ) -> Vec<(&'a Path, &'a Reference)> {
         match path {
             Some(path) => self
                 .md_files
                 .get(path)
                 .map(|md| &md.references)
-                .map(|vec| vec.iter().map(|i| (path, i)).collect()),
-            None => Some(
-                self.md_files
-                    .iter()
-                    .flat_map(|(path, md)| md.references.iter().map(|link| (path.as_path(), link)))
-                    .collect(),
-            ),
+                .map(|vec| vec.iter().map(|i| (path, i)).collect())
+                .unwrap_or_default(),
+            None => self
+                .md_files
+                .iter()
+                .flat_map(|(path, md)| md.references.iter().map(|link| (path.as_path(), link)))
+                .collect(),
         }
     }
 
@@ -235,7 +235,7 @@ impl Vault {
         path: &'a Path,
         position: Position,
     ) -> Option<&'a Reference> {
-        let links = self.select_references(Some(path))?;
+        let links = self.select_references(Some(path));
 
         let (_path, reference) = links.into_iter().find(|&l| {
             l.1.data().range.start.line <= position.line
@@ -294,56 +294,55 @@ impl Vault {
                     .flatten()
                     .collect();
 
-                let unresolved = self.select_references(None).map(|references| {
-                    references
-                        .iter()
-                        .unique_by(|(_, reference)| &reference.data().reference_text)
-                        .par_bridge()
-                        .into_par_iter()
-                        .filter(|(_, reference)| {
-                            !resolved_referenceables_refnames
-                                .contains(&reference.data().reference_text)
-                        })
-                        .flat_map(|(_, reference)| match reference {
-                            Reference::WikiFileLink(data) | Reference::MDFileLink(data) => {
-                                let mut path = self.root_dir().clone();
-                                path.push(&reference.data().reference_text);
+                let references = self.select_references(None);
+                let unresolved: Vec<_> = references
+                    .iter()
+                    .unique_by(|(_, reference)| &reference.data().reference_text)
+                    .par_bridge()
+                    .into_par_iter()
+                    .filter(|(_, reference)| {
+                        !resolved_referenceables_refnames
+                            .contains(&reference.data().reference_text)
+                    })
+                    .flat_map(|(_, reference)| match reference {
+                        Reference::WikiFileLink(data) | Reference::MDFileLink(data) => {
+                            let mut path = self.root_dir().clone();
+                            path.push(&reference.data().reference_text);
 
-                                Some(Referenceable::UnresovledFile(path, &data.reference_text))
+                            Some(Referenceable::UnresovledFile(path, &data.reference_text))
 
-                                // match data.reference_text.chars().collect_vec().as_slice() {
+                            // match data.reference_text.chars().collect_vec().as_slice() {
 
-                                //     [..,'.','m','d'] =>
-                                //     ['.', '/', rest @ ..]
-                                //     | ['/', rest @ ..]
-                                //     | rest if !rest.contains(&'.') => Some(Referenceable::UnresovledFile(path, &data.reference_text)),
-                                //     _ => None
-                                // }
-                            }
-                            Reference::WikiHeadingLink(_data, end_path, heading)
-                            | Reference::MDHeadingLink(_data, end_path, heading) => {
-                                let mut path = self.root_dir().clone();
-                                path.push(end_path);
+                            //     [..,'.','m','d'] =>
+                            //     ['.', '/', rest @ ..]
+                            //     | ['/', rest @ ..]
+                            //     | rest if !rest.contains(&'.') => Some(Referenceable::UnresovledFile(path, &data.reference_text)),
+                            //     _ => None
+                            // }
+                        }
+                        Reference::WikiHeadingLink(_data, end_path, heading)
+                        | Reference::MDHeadingLink(_data, end_path, heading) => {
+                            let mut path = self.root_dir().clone();
+                            path.push(end_path);
 
-                                Some(Referenceable::UnresolvedHeading(path, end_path, heading))
-                            }
-                            Reference::WikiIndexedBlockLink(_data, end_path, index)
-                            | Reference::MDIndexedBlockLink(_data, end_path, index) => {
-                                let mut path = self.root_dir().clone();
-                                path.push(end_path);
+                            Some(Referenceable::UnresolvedHeading(path, end_path, heading))
+                        }
+                        Reference::WikiIndexedBlockLink(_data, end_path, index)
+                        | Reference::MDIndexedBlockLink(_data, end_path, index) => {
+                            let mut path = self.root_dir().clone();
+                            path.push(end_path);
 
-                                Some(Referenceable::UnresovledIndexedBlock(path, end_path, index))
-                            }
-                            Reference::Tag(..)
-                            | Reference::Footnote(..)
-                            | Reference::LinkRef(..) => None,
-                        })
-                        .collect::<Vec<_>>()
-                });
+                            Some(Referenceable::UnresovledIndexedBlock(path, end_path, index))
+                        }
+                        Reference::Tag(..)
+                        | Reference::Footnote(..)
+                        | Reference::LinkRef(..) => None,
+                    })
+                    .collect();
 
                 resolved_referenceables
                     .into_iter()
-                    .chain(unresolved.into_iter().flatten())
+                    .chain(unresolved)
                     .collect()
             }
         }
@@ -372,7 +371,7 @@ impl Vault {
         &self,
         referenceable: &Referenceable,
     ) -> Option<Vec<(&Path, &Reference)>> {
-        let references = self.select_references(None)?;
+        let references = self.select_references(None);
 
         Some(
             references
