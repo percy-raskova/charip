@@ -873,6 +873,22 @@ impl Reference {
             .chain(link_ref_references)
     }
 
+    /// AST-based reference parsing (parallel implementation to regex-based `new()`).
+    ///
+    /// This method uses the markdown-rs AST parser instead of regex patterns to
+    /// extract references. It produces equivalent results to `new()` for link types
+    /// (wikilinks, MD links, footnotes, link references) but does NOT extract tags.
+    ///
+    /// # Arguments
+    /// * `text` - The markdown source text
+    /// * `file_name` - The name of the current file (used for same-file references like `[[#heading]]`)
+    ///
+    /// # Returns
+    /// An iterator over all `Reference` items found in the document (excluding tags).
+    pub fn new_ast(text: &str, file_name: &str) -> impl Iterator<Item = Reference> {
+        ast_refs::extract_references_from_ast(text, file_name).into_iter()
+    }
+
     pub fn references(
         &self,
         root_dir: &Path,
