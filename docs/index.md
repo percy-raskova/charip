@@ -47,6 +47,7 @@ development/target-environment
 :maxdepth: 2
 :caption: Reference
 
+reference/myst-spec
 reference/features
 reference/configuration
 reference/testing

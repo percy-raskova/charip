@@ -200,6 +200,28 @@ impl Vault {
         }
     }
 
+    /// Select MyST directives (```{note}, ```{warning}, etc.) in a file or vault.
+    pub fn select_myst_directives<'a>(
+        &'a self,
+        path: Option<&'a Path>,
+    ) -> Vec<(&'a Path, &'a MystSymbol)> {
+        self.select_myst_symbols(path)
+            .into_iter()
+            .filter(|(_, s)| s.kind == MystSymbolKind::Directive)
+            .collect()
+    }
+
+    /// Select MyST anchors ((target-name)=) in a file or vault.
+    pub fn select_myst_anchors<'a>(
+        &'a self,
+        path: Option<&'a Path>,
+    ) -> Vec<(&'a Path, &'a MystSymbol)> {
+        self.select_myst_symbols(path)
+            .into_iter()
+            .filter(|(_, s)| s.kind == MystSymbolKind::Anchor)
+            .collect()
+    }
+
     pub fn select_referenceable_at_position<'a>(
         &'a self,
         path: &'a Path,
@@ -2883,11 +2905,8 @@ Be careful!
         let vault = Vault::construct_vault(&settings, &vault_dir)
             .expect("Failed to construct vault");
 
-        let symbols = vault.select_myst_symbols(None);
-        let directives: Vec<_> = symbols
-            .iter()
-            .filter(|(_, s)| s.kind == MystSymbolKind::Directive)
-            .collect();
+        // Use the convenience method instead of manual filtering
+        let directives = vault.select_myst_directives(None);
 
         assert_eq!(directives.len(), 2, "Should find 2 directives");
     }
@@ -2902,11 +2921,8 @@ Be careful!
         let vault = Vault::construct_vault(&settings, &vault_dir)
             .expect("Failed to construct vault");
 
-        let symbols = vault.select_myst_symbols(None);
-        let anchors: Vec<_> = symbols
-            .iter()
-            .filter(|(_, s)| s.kind == MystSymbolKind::Anchor)
-            .collect();
+        // Use the convenience method instead of manual filtering
+        let anchors = vault.select_myst_anchors(None);
 
         assert_eq!(anchors.len(), 1, "Should find 1 anchor");
         assert_eq!(anchors[0].1.name, "my-anchor");
@@ -2930,12 +2946,110 @@ Be careful!
         let vault = Vault::construct_vault(&settings, &vault_dir)
             .expect("Failed to construct vault");
 
-        let all_symbols = vault.select_myst_symbols(None);
-        let anchors: Vec<_> = all_symbols
-            .iter()
-            .filter(|(_, s)| s.kind == MystSymbolKind::Anchor)
-            .collect();
+        // Use the convenience method instead of manual filtering
+        let anchors = vault.select_myst_anchors(None);
 
         assert_eq!(anchors.len(), 2, "Should find 2 anchors across files");
+    }
+
+    #[test]
+    fn test_select_myst_directives_with_path_filter() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+        // File with directives
+        fs::write(
+            vault_dir.join("with_directives.md"),
+            "```{note}\nA note\n```\n\n```{warning}\nA warning\n```"
+        ).unwrap();
+
+        // File without directives
+        fs::write(
+            vault_dir.join("plain.md"),
+            "# Just a heading\n\nSome plain text."
+        ).unwrap();
+
+        let settings = Settings::default();
+        let vault = Vault::construct_vault(&settings, &vault_dir)
+            .expect("Failed to construct vault");
+
+        // Get all directives
+        let all_directives = vault.select_myst_directives(None);
+        assert_eq!(all_directives.len(), 2, "Should find 2 directives total");
+
+        // Get directives from specific file
+        let file_path = vault_dir.join("with_directives.md");
+        let file_directives = vault.select_myst_directives(Some(&file_path));
+        assert_eq!(file_directives.len(), 2, "Should find 2 directives in file");
+
+        // Get directives from file without any
+        let plain_path = vault_dir.join("plain.md");
+        let plain_directives = vault.select_myst_directives(Some(&plain_path));
+        assert_eq!(plain_directives.len(), 0, "Should find 0 directives in plain file");
+    }
+
+    #[test]
+    fn test_select_myst_anchors_with_path_filter() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+        // File with anchors
+        fs::write(
+            vault_dir.join("with_anchors.md"),
+            "(anchor-one)=\n# Section One\n\n(anchor-two)=\n# Section Two"
+        ).unwrap();
+
+        // File without anchors
+        fs::write(
+            vault_dir.join("no_anchors.md"),
+            "# Just a heading"
+        ).unwrap();
+
+        let settings = Settings::default();
+        let vault = Vault::construct_vault(&settings, &vault_dir)
+            .expect("Failed to construct vault");
+
+        // Get all anchors
+        let all_anchors = vault.select_myst_anchors(None);
+        assert_eq!(all_anchors.len(), 2, "Should find 2 anchors total");
+
+        // Get anchors from specific file
+        let file_path = vault_dir.join("with_anchors.md");
+        let file_anchors = vault.select_myst_anchors(Some(&file_path));
+        assert_eq!(file_anchors.len(), 2, "Should find 2 anchors in file");
+
+        // Get anchors from file without any
+        let no_anchor_path = vault_dir.join("no_anchors.md");
+        let no_anchors = vault.select_myst_anchors(Some(&no_anchor_path));
+        assert_eq!(no_anchors.len(), 0, "Should find 0 anchors in plain file");
+    }
+
+    #[test]
+    fn test_convenience_methods_return_correct_directive_names() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+        let content = r#"
+```{note}
+Note content
+```
+
+```{admonition} Custom Title
+:class: tip
+Admonition content
+```
+
+```{code-block} python
+print("hello")
+```
+"#;
+        fs::write(vault_dir.join("test.md"), content).unwrap();
+
+        let settings = Settings::default();
+        let vault = Vault::construct_vault(&settings, &vault_dir)
+            .expect("Failed to construct vault");
+
+        let directives = vault.select_myst_directives(None);
+        let names: Vec<_> = directives.iter().map(|(_, s)| s.name.as_str()).collect();
+
+        assert!(names.contains(&"note"), "Should contain 'note' directive");
+        assert!(names.contains(&"admonition"), "Should contain 'admonition' directive");
+        assert!(names.contains(&"code-block"), "Should contain 'code-block' directive");
     }
 }
