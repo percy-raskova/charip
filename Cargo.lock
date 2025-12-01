@@ -222,6 +222,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "charip"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "config",
+ "do-notation",
+ "fuzzydate",
+ "indexmap",
+ "itertools",
+ "markdown",
+ "nanoid",
+ "nucleo-matcher",
+ "once_cell",
+ "pathdiff",
+ "petgraph",
+ "rayon",
+ "regex",
+ "ropey",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "shellexpand",
+ "tempfile",
+ "tokio",
+ "tower-lsp",
+ "urlencoding",
+ "walkdir",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -964,38 +996,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5cab8f2cadc416a82d2e783a1946388b31654d391d1c7d92cc1f03e295b1deb"
 dependencies = [
  "unicode-id",
-]
-
-[[package]]
-name = "markdown-oxide"
-version = "0.25.9"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "config",
- "do-notation",
- "fuzzydate",
- "indexmap",
- "itertools",
- "markdown",
- "nanoid",
- "nucleo-matcher",
- "once_cell",
- "pathdiff",
- "petgraph",
- "rayon",
- "regex",
- "ropey",
- "serde",
- "serde_json",
- "serde_yaml",
- "shellexpand",
- "tempfile",
- "tokio",
- "tower-lsp",
- "urlencoding",
- "walkdir",
 ]
 
 [[package]]
