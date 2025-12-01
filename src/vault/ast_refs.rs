@@ -2,29 +2,751 @@
 //!
 //! This module provides an alternative to regex-based parsing,
 //! extracting references by traversing the markdown AST.
+//!
+//! # Architecture
+//!
+//! The extraction works in two layers:
+//! 1. **Native CommonMark nodes**: `Link`, `FootnoteReference`, `LinkReference`
+//!    are directly parsed by markdown-rs and extracted from the AST.
+//! 2. **Wikilinks**: `[[...]]` syntax is NOT CommonMark, so it appears as
+//!    `Text` nodes. We apply a scoped regex to text nodes only, with proper
+//!    byte offset adjustment.
 
-use markdown::{to_mdast, ParseOptions, mdast::Node};
+use markdown::{mdast::Node, to_mdast, ParseOptions};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use ropey::Rope;
-use super::{Reference, ReferenceData, MyRange};
+
+use super::{MyRange, Reference, ReferenceData};
 
 /// Extract all references from markdown text using AST parsing.
 ///
 /// This is the AST-based replacement for `Reference::new()`.
-pub fn extract_references_from_ast<'a>(
-    text: &'a str,
-    file_name: &'a str,
-) -> impl Iterator<Item = Reference> + 'a {
-    // TODO: Implement in Phase 3
-    std::iter::empty()
+///
+/// # Arguments
+/// * `text` - The markdown source text
+/// * `file_name` - The name of the current file (used for same-file references like `[[#heading]]`)
+///
+/// # Returns
+/// An iterator over all `Reference` items found in the document.
+pub fn extract_references_from_ast(text: &str, file_name: &str) -> Vec<Reference> {
+    // Parse with GFM options to get footnote support
+    let parse_opts = ParseOptions::gfm();
+
+    let ast = match to_mdast(text, &parse_opts) {
+        Ok(node) => node,
+        Err(_) => return Vec::new(),
+    };
+
+    let rope = Rope::from_str(text);
+    let mut refs = Vec::new();
+
+    // Check if document has any link reference definitions (for LinkRef extraction)
+    let has_definitions = has_link_definitions(&ast);
+
+    traverse_node(&ast, text, file_name, &rope, has_definitions, &mut refs);
+
+    refs
+}
+
+/// Check if the AST contains any Definition nodes (link reference definitions).
+fn has_link_definitions(node: &Node) -> bool {
+    match node {
+        Node::Definition(_) => true,
+        _ => {
+            if let Some(children) = node.children() {
+                children.iter().any(has_link_definitions)
+            } else {
+                false
+            }
+        }
+    }
+}
+
+/// Recursively traverse AST nodes and extract references.
+fn traverse_node(
+    node: &Node,
+    text: &str,
+    file_name: &str,
+    rope: &Rope,
+    has_definitions: bool,
+    refs: &mut Vec<Reference>,
+) {
+    match node {
+        Node::Link(link) => {
+            if let Some(reference) = extract_md_link(link, text, rope) {
+                refs.push(reference);
+            }
+        }
+        Node::Text(text_node) => {
+            // Extract wikilinks from text nodes (not native CommonMark)
+            let wikilinks = extract_wikilinks(text_node, file_name, rope);
+            refs.extend(wikilinks);
+
+            // Extract footnotes from text nodes (when no definition exists,
+            // markdown-rs doesn't parse them as FootnoteReference)
+            let footnotes = extract_footnotes_from_text(text_node, rope);
+            refs.extend(footnotes);
+        }
+        Node::FootnoteReference(fref) => {
+            if let Some(reference) = extract_footnote_ref(fref, rope) {
+                refs.push(reference);
+            }
+        }
+        Node::LinkReference(lref) => {
+            // Only extract link references if definitions exist in the document
+            if has_definitions {
+                if let Some(reference) = extract_link_ref(lref, rope) {
+                    refs.push(reference);
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // Recurse into children
+    if let Some(children) = node.children() {
+        for child in children {
+            traverse_node(child, text, file_name, rope, has_definitions, refs);
+        }
+    }
+}
+
+/// Extract a Reference from a markdown Link node.
+///
+/// Handles:
+/// - `[display](file.md)` -> MDFileLink
+/// - `[display](file.md#heading)` -> MDHeadingLink
+/// - `[display](file.md#^block)` -> MDIndexedBlockLink
+///
+/// Skips external URLs (http://, https://, data:).
+fn extract_md_link(link: &markdown::mdast::Link, _text: &str, rope: &Rope) -> Option<Reference> {
+    let url = &link.url;
+
+    // Skip external URLs
+    if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("data:") {
+        return None;
+    }
+
+    // Get position for range calculation
+    let position = link.position.as_ref()?;
+    let range = MyRange::from_range(rope, position.start.offset..position.end.offset);
+
+    // URL decode the path
+    let decoded_url = urlencoding::decode(url)
+        .map(|s| s.into_owned())
+        .unwrap_or_else(|_| url.clone());
+
+    // Parse path and fragment
+    let (path, fragment) = if let Some(hash_pos) = decoded_url.find('#') {
+        let (p, f) = decoded_url.split_at(hash_pos);
+        (p.to_string(), Some(&f[1..])) // Skip the '#'
+    } else {
+        (decoded_url, None)
+    };
+
+    // Strip .md extension if present for reference_text
+    let path_without_ext = path
+        .strip_suffix(".md")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| path.clone());
+
+    // Only accept .md files or files without extension
+    if !path.is_empty() && !path.ends_with(".md") && path.contains('.') {
+        return None;
+    }
+
+    // Extract display text from link children
+    let display_text = extract_text_from_children(&link.children);
+
+    match fragment {
+        Some(frag) if frag.starts_with('^') => {
+            // Indexed block link
+            let index = &frag[1..]; // Skip the '^'
+            Some(Reference::MDIndexedBlockLink(
+                ReferenceData {
+                    reference_text: format!("{}#{}", path_without_ext, frag),
+                    display_text,
+                    range,
+                },
+                path_without_ext,
+                index.to_string(),
+            ))
+        }
+        Some(heading) => {
+            // Heading link
+            Some(Reference::MDHeadingLink(
+                ReferenceData {
+                    reference_text: format!("{}#{}", path_without_ext, heading),
+                    display_text,
+                    range,
+                },
+                path_without_ext,
+                heading.to_string(),
+            ))
+        }
+        None => {
+            // Plain file link
+            Some(Reference::MDFileLink(ReferenceData {
+                reference_text: path_without_ext,
+                display_text,
+                range,
+            }))
+        }
+    }
+}
+
+/// Extract text content from a list of child nodes.
+fn extract_text_from_children(children: &[Node]) -> Option<String> {
+    let text: String = children
+        .iter()
+        .filter_map(|child| match child {
+            Node::Text(t) => Some(t.value.clone()),
+            _ => None,
+        })
+        .collect();
+
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+/// Regex for parsing wikilinks from text nodes.
+///
+/// Captures:
+/// - filepath: The file path (optional)
+/// - infileref: The heading or block reference after # (optional)
+/// - ending: File extension like .md (optional, used for filtering)
+/// - display: Display text after | (optional)
+static WIKILINK_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"\[\[(?<filepath>[^\[\]\|\.\#]+)?(\#(?<infileref>[^\[\]\.\|]+))?(?<ending>\.[^\# <>]+)?(\|(?<display>[^\[\]\.\|]+))?\]\]"
+    ).unwrap()
+});
+
+/// Regex for parsing footnote references from text nodes.
+///
+/// This handles footnotes that appear in text when there's no definition
+/// (markdown-rs only parses FootnoteReference when definition exists).
+///
+/// Matches: [^identifier] but NOT [^identifier]: (which is a definition)
+static FOOTNOTE_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?<start>\[?)(?<full>\[(?<index>\^[^\[\] ]+)\])(?<end>:?)").unwrap());
+
+/// Extract wikilinks from a Text node.
+///
+/// Wikilinks are not native CommonMark, so they appear as plain text.
+/// We apply a scoped regex to extract them with proper offset adjustment.
+fn extract_wikilinks(
+    text_node: &markdown::mdast::Text,
+    file_name: &str,
+    rope: &Rope,
+) -> Vec<Reference> {
+    let position = match &text_node.position {
+        Some(pos) => pos,
+        None => return Vec::new(),
+    };
+
+    let base_offset = position.start.offset;
+    let node_text = &text_node.value;
+
+    WIKILINK_RE
+        .captures_iter(node_text)
+        .filter(|captures| {
+            // Filter to only .md files or no extension
+            matches!(
+                captures.name("ending").map(|e| e.as_str()),
+                Some(".md") | None
+            )
+        })
+        .filter_map(|captures| {
+            let full_match = captures.get(0)?;
+
+            // Calculate absolute byte range in source document
+            let start = base_offset + full_match.start();
+            let end = base_offset + full_match.end();
+            let range = MyRange::from_range(rope, start..end);
+
+            let filepath = captures
+                .name("filepath")
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_else(|| file_name.to_string());
+
+            let infileref = captures.name("infileref").map(|m| m.as_str());
+            let display_text = captures.name("display").map(|m| m.as_str().to_string());
+
+            match infileref {
+                Some(frag) if frag.starts_with('^') => {
+                    // Indexed block link
+                    let index = &frag[1..];
+                    Some(Reference::WikiIndexedBlockLink(
+                        ReferenceData {
+                            reference_text: format!("{}#{}", filepath, frag),
+                            display_text,
+                            range,
+                        },
+                        filepath,
+                        index.to_string(),
+                    ))
+                }
+                Some(heading) => {
+                    // Heading link
+                    Some(Reference::WikiHeadingLink(
+                        ReferenceData {
+                            reference_text: format!("{}#{}", filepath, heading),
+                            display_text,
+                            range,
+                        },
+                        filepath,
+                        heading.to_string(),
+                    ))
+                }
+                None => {
+                    // Plain file link
+                    Some(Reference::WikiFileLink(ReferenceData {
+                        reference_text: filepath,
+                        display_text,
+                        range,
+                    }))
+                }
+            }
+        })
+        .collect()
+}
+
+/// Extract footnote references from a Text node.
+///
+/// Footnotes [^ref] that don't have definitions are not parsed as
+/// FootnoteReference by markdown-rs, so we use regex extraction.
+fn extract_footnotes_from_text(text_node: &markdown::mdast::Text, rope: &Rope) -> Vec<Reference> {
+    let position = match &text_node.position {
+        Some(pos) => pos,
+        None => return Vec::new(),
+    };
+
+    let base_offset = position.start.offset;
+    let node_text = &text_node.value;
+
+    FOOTNOTE_RE
+        .captures_iter(node_text)
+        // Filter out definitions (start with [ and end with :) and nested brackets
+        .filter(|capture| {
+            matches!(
+                (capture.name("start"), capture.name("end")),
+                (Some(start), Some(end)) if !start.as_str().starts_with('[') && !end.as_str().ends_with(':')
+            )
+        })
+        .filter_map(|capture| {
+            let full = capture.name("full")?;
+            let index = capture.name("index")?;
+
+            let start = base_offset + full.start();
+            let end = base_offset + full.end();
+            let range = MyRange::from_range(rope, start..end);
+
+            Some(Reference::Footnote(ReferenceData {
+                reference_text: index.as_str().to_string(),
+                display_text: None,
+                range,
+            }))
+        })
+        .collect()
+}
+
+/// Extract a Reference from a FootnoteReference node.
+fn extract_footnote_ref(
+    fref: &markdown::mdast::FootnoteReference,
+    rope: &Rope,
+) -> Option<Reference> {
+    let position = fref.position.as_ref()?;
+    let range = MyRange::from_range(rope, position.start.offset..position.end.offset);
+
+    Some(Reference::Footnote(ReferenceData {
+        reference_text: format!("^{}", fref.identifier),
+        display_text: None,
+        range,
+    }))
+}
+
+/// Extract a Reference from a LinkReference node.
+fn extract_link_ref(lref: &markdown::mdast::LinkReference, rope: &Rope) -> Option<Reference> {
+    let position = lref.position.as_ref()?;
+    let range = MyRange::from_range(rope, position.start.offset..position.end.offset);
+
+    Some(Reference::LinkRef(ReferenceData {
+        reference_text: lref.identifier.clone(),
+        display_text: None,
+        range,
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // ========================================================================
+    // Step 2.1: MD Link Tests
+    // ========================================================================
+
     #[test]
-    fn test_placeholder() {
-        let refs: Vec<_> = extract_references_from_ast("test", "file").collect();
-        assert!(refs.is_empty()); // Placeholder until implementation
+    fn test_md_link_simple() {
+        let text = "[click here](other.md)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        assert!(matches!(&refs[0], Reference::MDFileLink(_)));
+        assert_eq!(refs[0].data().reference_text, "other");
+        assert_eq!(refs[0].data().display_text, Some("click here".to_string()));
+    }
+
+    #[test]
+    fn test_md_link_with_heading() {
+        let text = "[go to section](doc.md#introduction)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        match &refs[0] {
+            Reference::MDHeadingLink(data, file, heading) => {
+                assert_eq!(data.reference_text, "doc#introduction");
+                assert_eq!(file, "doc");
+                assert_eq!(heading, "introduction");
+            }
+            _ => panic!("Expected MDHeadingLink"),
+        }
+    }
+
+    #[test]
+    fn test_md_link_with_block() {
+        let text = "[see block](notes.md#^abc123)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        match &refs[0] {
+            Reference::MDIndexedBlockLink(data, file, index) => {
+                assert_eq!(data.reference_text, "notes#^abc123");
+                assert_eq!(file, "notes");
+                assert_eq!(index, "abc123");
+            }
+            _ => panic!("Expected MDIndexedBlockLink"),
+        }
+    }
+
+    #[test]
+    fn test_md_link_skip_external_http() {
+        let text = "[example](https://example.com)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+        assert!(refs.is_empty(), "Should skip https URLs");
+    }
+
+    #[test]
+    fn test_md_link_skip_external_http_plain() {
+        let text = "[example](http://example.com)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+        assert!(refs.is_empty(), "Should skip http URLs");
+    }
+
+    #[test]
+    fn test_md_link_skip_data_uri() {
+        let text = "[image](data:image/png;base64,abc)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+        assert!(refs.is_empty(), "Should skip data URIs");
+    }
+
+    #[test]
+    fn test_md_link_url_encoded() {
+        let text = "[doc](my%20file.md)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].data().reference_text, "my file");
+    }
+
+    #[test]
+    fn test_md_link_relative_path() {
+        let text = "[doc](./subdir/file.md)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].data().reference_text, "./subdir/file");
+    }
+
+    #[test]
+    fn test_md_link_no_extension() {
+        let text = "[doc](readme)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].data().reference_text, "readme");
+    }
+
+    // ========================================================================
+    // Step 2.2: Wikilink Tests
+    // ========================================================================
+
+    #[test]
+    fn test_wikilink_simple() {
+        let text = "Check out [[other note]]";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        assert!(matches!(&refs[0], Reference::WikiFileLink(_)));
+        assert_eq!(refs[0].data().reference_text, "other note");
+    }
+
+    #[test]
+    fn test_wikilink_with_heading() {
+        let text = "See [[doc#section]]";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        match &refs[0] {
+            Reference::WikiHeadingLink(data, file, heading) => {
+                assert_eq!(data.reference_text, "doc#section");
+                assert_eq!(file, "doc");
+                assert_eq!(heading, "section");
+            }
+            _ => panic!("Expected WikiHeadingLink"),
+        }
+    }
+
+    #[test]
+    fn test_wikilink_with_block() {
+        let text = "Refer to [[notes#^blockid]]";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        match &refs[0] {
+            Reference::WikiIndexedBlockLink(data, file, index) => {
+                assert_eq!(data.reference_text, "notes#^blockid");
+                assert_eq!(file, "notes");
+                assert_eq!(index, "blockid");
+            }
+            _ => panic!("Expected WikiIndexedBlockLink"),
+        }
+    }
+
+    #[test]
+    fn test_wikilink_with_display() {
+        let text = "Read [[other|this document]]";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].data().reference_text, "other");
+        assert_eq!(
+            refs[0].data().display_text,
+            Some("this document".to_string())
+        );
+    }
+
+    #[test]
+    fn test_wikilink_heading_with_display() {
+        let text = "See [[doc#section|the section]]";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        match &refs[0] {
+            Reference::WikiHeadingLink(data, file, heading) => {
+                assert_eq!(data.reference_text, "doc#section");
+                assert_eq!(file, "doc");
+                assert_eq!(heading, "section");
+                assert_eq!(data.display_text, Some("the section".to_string()));
+            }
+            _ => panic!("Expected WikiHeadingLink"),
+        }
+    }
+
+    #[test]
+    fn test_wikilink_same_file_heading() {
+        let text = "Jump to [[#local-heading]]";
+        let refs: Vec<_> = extract_references_from_ast(text, "current_file");
+
+        assert_eq!(refs.len(), 1);
+        match &refs[0] {
+            Reference::WikiHeadingLink(data, file, heading) => {
+                assert_eq!(file, "current_file");
+                assert_eq!(heading, "local-heading");
+                assert_eq!(data.reference_text, "current_file#local-heading");
+            }
+            _ => panic!("Expected WikiHeadingLink"),
+        }
+    }
+
+    #[test]
+    fn test_multiple_wikilinks() {
+        let text = "First [[note1]] and second [[note2]]";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].data().reference_text, "note1");
+        assert_eq!(refs[1].data().reference_text, "note2");
+    }
+
+    // ========================================================================
+    // Step 2.3: Footnote Tests
+    // ========================================================================
+
+    #[test]
+    fn test_footnote_reference() {
+        let text = "Some text[^note] more text.";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        match &refs[0] {
+            Reference::Footnote(data) => {
+                assert_eq!(data.reference_text, "^note");
+            }
+            _ => panic!("Expected Footnote"),
+        }
+    }
+
+    #[test]
+    fn test_footnote_definition_not_extracted() {
+        // Footnote definitions should NOT be extracted as references
+        let text = "[^note]: This is the footnote content.";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        // Should be empty - definitions are not references
+        assert!(
+            refs.is_empty(),
+            "Footnote definitions should not be extracted as references"
+        );
+    }
+
+    #[test]
+    fn test_multiple_footnotes() {
+        let text = "First[^a] and second[^b] footnotes.";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 2);
+        assert!(matches!(&refs[0], Reference::Footnote(_)));
+        assert!(matches!(&refs[1], Reference::Footnote(_)));
+    }
+
+    // ========================================================================
+    // Step 2.4: Link Reference Tests
+    // ========================================================================
+
+    #[test]
+    fn test_link_ref_with_definition() {
+        let text = "Use [example] in text.\n\n[example]: http://example.com";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        match &refs[0] {
+            Reference::LinkRef(data) => {
+                assert_eq!(data.reference_text, "example");
+            }
+            _ => panic!("Expected LinkRef"),
+        }
+    }
+
+    #[test]
+    fn test_link_ref_without_definition() {
+        // Without a definition, [ref] is just text, not a link reference
+        let text = "Use [example] in text.";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        // Should be empty - no definition means no LinkRef
+        assert!(
+            refs.is_empty(),
+            "Link references without definitions should not be extracted"
+        );
+    }
+
+    #[test]
+    fn test_multiple_link_refs() {
+        let text = "See [foo] and [bar] here.\n\n[foo]: http://foo.com\n[bar]: http://bar.com";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 2);
+        assert!(refs.iter().all(|r| matches!(r, Reference::LinkRef(_))));
+    }
+
+    // ========================================================================
+    // Integration Tests
+    // ========================================================================
+
+    #[test]
+    fn test_mixed_references() {
+        // Note: Link definitions must be at root level, not inside footnote definitions
+        let text = r#"# Document
+
+Check [[wiki link]] and [md link](other.md).
+
+See footnote[^1] and reference [ref].
+
+[ref]: http://example.com
+
+[^1]: Footnote text
+"#;
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        // Should have: 1 wikilink, 1 md link, 1 footnote, 1 link ref = 4
+        assert_eq!(refs.len(), 4);
+
+        let wiki_count = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::WikiFileLink(_)))
+            .count();
+        let md_count = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::MDFileLink(_)))
+            .count();
+        let footnote_count = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Footnote(_)))
+            .count();
+        let linkref_count = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::LinkRef(_)))
+            .count();
+
+        assert_eq!(wiki_count, 1);
+        assert_eq!(md_count, 1);
+        assert_eq!(footnote_count, 1);
+        assert_eq!(linkref_count, 1);
+    }
+
+    #[test]
+    fn test_range_positions() {
+        let text = "Start [[link]] end";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        let range = &refs[0].data().range;
+
+        // [[link]] starts at position 6 and ends at 14
+        assert_eq!(range.start.line, 0);
+        assert_eq!(range.start.character, 6);
+        assert_eq!(range.end.line, 0);
+        assert_eq!(range.end.character, 14);
+    }
+
+    #[test]
+    fn test_multiline_range() {
+        let text = "First line\n[[link]] on second line";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+
+        assert_eq!(refs.len(), 1);
+        let range = &refs[0].data().range;
+
+        // [[link]] is on line 1 (0-indexed), starting at character 0
+        assert_eq!(range.start.line, 1);
+        assert_eq!(range.start.character, 0);
+    }
+
+    #[test]
+    fn test_empty_document() {
+        let refs: Vec<_> = extract_references_from_ast("", "test");
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn test_document_with_no_references() {
+        let text = "# Just a heading\n\nSome plain text without any links.";
+        let refs: Vec<_> = extract_references_from_ast(text, "test");
+        assert!(refs.is_empty());
     }
 }

@@ -1,4 +1,4 @@
-use markdown::{to_mdast, ParseOptions, mdast::Node};
+use markdown::{mdast::Node, to_mdast, ParseOptions};
 
 /// Type-safe representation of MyST symbol kinds.
 /// Using an enum prevents typos and enables compile-time checking.
@@ -6,7 +6,7 @@ use markdown::{to_mdast, ParseOptions, mdast::Node};
 pub enum MystSymbolKind {
     Directive,
     Anchor,
-    Reference,  // Placeholder for future MyST cross-refs like {ref}`target`
+    Reference, // Placeholder for future MyST cross-refs like {ref}`target`
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
@@ -19,14 +19,14 @@ pub struct MystSymbol {
 pub fn parse(text: &str) -> Vec<MystSymbol> {
     // We might need to configure ParseOptions to be more permissive or GFM-like if needed
     let options = ParseOptions::default();
-    
+
     match to_mdast(text, &options) {
         Ok(ast) => {
             let mut symbols = vec![];
             scan_for_myst(&ast, &mut symbols);
             symbols
-        },
-        Err(_) => vec![] // Fail gracefully
+        }
+        Err(_) => vec![], // Fail gracefully
     }
 }
 
@@ -43,7 +43,7 @@ pub fn scan_for_myst(node: &Node, symbols: &mut Vec<MystSymbol>) {
         // CASE 1: Directives (```{note})
         Node::Code(code) => {
             if let Some(lang) = &code.lang {
-                 if lang.starts_with('{') && lang.ends_with('}') {
+                if lang.starts_with('{') && lang.ends_with('}') {
                     let directive = lang.trim_matches(|c| c == '{' || c == '}');
                     symbols.push(MystSymbol {
                         kind: MystSymbolKind::Directive,
@@ -52,26 +52,24 @@ pub fn scan_for_myst(node: &Node, symbols: &mut Vec<MystSymbol>) {
                     });
                 }
             }
-        },
+        }
         // CASE 2: Targets ( (my-target)= )
         Node::Text(text) => {
-             // Basic detection for (target)= at the start/end of a text node
-             // This is a heuristic as markdown parsers might split text
-             let val = text.value.trim();
-             if val.starts_with('(') && val.ends_with(")=") {
-                 let target = val
-                   .trim_start_matches('(')
-                   .trim_end_matches(")=");
-                 
-                 if !target.is_empty() {
-                     symbols.push(MystSymbol {
+            // Basic detection for (target)= at the start/end of a text node
+            // This is a heuristic as markdown parsers might split text
+            let val = text.value.trim();
+            if val.starts_with('(') && val.ends_with(")=") {
+                let target = val.trim_start_matches('(').trim_end_matches(")=");
+
+                if !target.is_empty() {
+                    symbols.push(MystSymbol {
                         kind: MystSymbolKind::Anchor,
                         name: target.to_string(),
                         line: text.position.as_ref().map(|p| p.start.line).unwrap_or(0),
                     });
-                 }
+                }
             }
-        },
+        }
         _ => {}
     }
 }
@@ -111,22 +109,26 @@ This is the body of the note.
 This is a note
 
     "#;
-    
-    let ast = markdown::to_mdast(input, &markdown::ParseOptions::default()).unwrap();
-    let mut symbols = Vec::new();
-    scan_for_myst(&ast, &mut symbols);
 
-    assert!(symbols.iter().any(|s| s.kind == MystSymbolKind::Directive && s.name == "note"));
-}
+        let ast = markdown::to_mdast(input, &markdown::ParseOptions::default()).unwrap();
+        let mut symbols = Vec::new();
+        scan_for_myst(&ast, &mut symbols);
 
-#[test]
-fn test_finds_myst_anchor() {
-    let input = "Here is a text.\n\n(my-target)=\n# Heading";
+        assert!(symbols
+            .iter()
+            .any(|s| s.kind == MystSymbolKind::Directive && s.name == "note"));
+    }
 
-    let ast = markdown::to_mdast(input, &markdown::ParseOptions::default()).unwrap();
-    let mut symbols = Vec::new();
-    scan_for_myst(&ast, &mut symbols);
+    #[test]
+    fn test_finds_myst_anchor() {
+        let input = "Here is a text.\n\n(my-target)=\n# Heading";
 
-    assert!(symbols.iter().any(|s| s.kind == MystSymbolKind::Anchor && s.name == "my-target"));
-}
+        let ast = markdown::to_mdast(input, &markdown::ParseOptions::default()).unwrap();
+        let mut symbols = Vec::new();
+        scan_for_myst(&ast, &mut symbols);
+
+        assert!(symbols
+            .iter()
+            .any(|s| s.kind == MystSymbolKind::Anchor && s.name == "my-target"));
+    }
 }

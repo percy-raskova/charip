@@ -7,7 +7,9 @@ use crate::vault::{HeadingLevel, ReferenceData};
 use crate::vault::{MDLinkReferenceDefinition, Refname};
 
 use crate::vault::Reference::*;
-use crate::vault::{MDFile, MDFootnote, MDHeading, MDIndexedBlock, MDTag, Reference, Referenceable};
+use crate::vault::{
+    MDFile, MDFootnote, MDHeading, MDIndexedBlock, MDTag, Reference, Referenceable,
+};
 
 #[test]
 fn wiki_link_parsing() {

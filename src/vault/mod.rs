@@ -332,8 +332,7 @@ impl Vault {
                     .par_bridge()
                     .into_par_iter()
                     .filter(|(_, reference)| {
-                        !resolved_referenceables_refnames
-                            .contains(&reference.data().reference_text)
+                        !resolved_referenceables_refnames.contains(&reference.data().reference_text)
                     })
                     .flat_map(|(_, reference)| match reference {
                         Reference::WikiFileLink(data) | Reference::MDFileLink(data) => {
@@ -365,9 +364,9 @@ impl Vault {
 
                             Some(Referenceable::UnresovledIndexedBlock(path, end_path, index))
                         }
-                        Reference::Tag(..)
-                        | Reference::Footnote(..)
-                        | Reference::LinkRef(..) => None,
+                        Reference::Tag(..) | Reference::Footnote(..) | Reference::LinkRef(..) => {
+                            None
+                        }
                     })
                     .collect();
 
@@ -1095,7 +1094,6 @@ fn generic_link_constructor<T: ParseableReferenceConstructor>(
         )),
     }
 }
-
 
 impl MDHeading {
     fn new(text: &str) -> impl Iterator<Item = MDHeading> + '_ {

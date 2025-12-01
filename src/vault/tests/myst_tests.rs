@@ -30,8 +30,7 @@ Be careful!
     fs::write(&test_file, content).unwrap();
 
     let settings = Settings::default();
-    let vault = Vault::construct_vault(&settings, &vault_dir)
-        .expect("Failed to construct vault");
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
 
     // Use the convenience method instead of manual filtering
     let directives = vault.select_myst_directives(None);
@@ -46,8 +45,7 @@ fn test_vault_extracts_myst_anchors() {
     fs::write(vault_dir.join("test.md"), content).unwrap();
 
     let settings = Settings::default();
-    let vault = Vault::construct_vault(&settings, &vault_dir)
-        .expect("Failed to construct vault");
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
 
     // Use the convenience method instead of manual filtering
     let anchors = vault.select_myst_anchors(None);
@@ -62,17 +60,18 @@ fn test_vault_finds_anchors_across_files() {
 
     fs::write(
         vault_dir.join("chapter1.md"),
-        "(chapter-1-intro)=\n# Chapter 1"
-    ).unwrap();
+        "(chapter-1-intro)=\n# Chapter 1",
+    )
+    .unwrap();
 
     fs::write(
         vault_dir.join("chapter2.md"),
-        "(chapter-2-summary)=\n# Chapter 2"
-    ).unwrap();
+        "(chapter-2-summary)=\n# Chapter 2",
+    )
+    .unwrap();
 
     let settings = Settings::default();
-    let vault = Vault::construct_vault(&settings, &vault_dir)
-        .expect("Failed to construct vault");
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
 
     // Use the convenience method instead of manual filtering
     let anchors = vault.select_myst_anchors(None);
@@ -87,18 +86,19 @@ fn test_select_myst_directives_with_path_filter() {
     // File with directives
     fs::write(
         vault_dir.join("with_directives.md"),
-        "```{note}\nA note\n```\n\n```{warning}\nA warning\n```"
-    ).unwrap();
+        "```{note}\nA note\n```\n\n```{warning}\nA warning\n```",
+    )
+    .unwrap();
 
     // File without directives
     fs::write(
         vault_dir.join("plain.md"),
-        "# Just a heading\n\nSome plain text."
-    ).unwrap();
+        "# Just a heading\n\nSome plain text.",
+    )
+    .unwrap();
 
     let settings = Settings::default();
-    let vault = Vault::construct_vault(&settings, &vault_dir)
-        .expect("Failed to construct vault");
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
 
     // Get all directives
     let all_directives = vault.select_myst_directives(None);
@@ -112,7 +112,11 @@ fn test_select_myst_directives_with_path_filter() {
     // Get directives from file without any
     let plain_path = vault_dir.join("plain.md");
     let plain_directives = vault.select_myst_directives(Some(&plain_path));
-    assert_eq!(plain_directives.len(), 0, "Should find 0 directives in plain file");
+    assert_eq!(
+        plain_directives.len(),
+        0,
+        "Should find 0 directives in plain file"
+    );
 }
 
 #[test]
@@ -122,18 +126,15 @@ fn test_select_myst_anchors_with_path_filter() {
     // File with anchors
     fs::write(
         vault_dir.join("with_anchors.md"),
-        "(anchor-one)=\n# Section One\n\n(anchor-two)=\n# Section Two"
-    ).unwrap();
+        "(anchor-one)=\n# Section One\n\n(anchor-two)=\n# Section Two",
+    )
+    .unwrap();
 
     // File without anchors
-    fs::write(
-        vault_dir.join("no_anchors.md"),
-        "# Just a heading"
-    ).unwrap();
+    fs::write(vault_dir.join("no_anchors.md"), "# Just a heading").unwrap();
 
     let settings = Settings::default();
-    let vault = Vault::construct_vault(&settings, &vault_dir)
-        .expect("Failed to construct vault");
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
 
     // Get all anchors
     let all_anchors = vault.select_myst_anchors(None);
@@ -170,13 +171,18 @@ print("hello")
     fs::write(vault_dir.join("test.md"), content).unwrap();
 
     let settings = Settings::default();
-    let vault = Vault::construct_vault(&settings, &vault_dir)
-        .expect("Failed to construct vault");
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
 
     let directives = vault.select_myst_directives(None);
     let names: Vec<_> = directives.iter().map(|(_, s)| s.name.as_str()).collect();
 
     assert!(names.contains(&"note"), "Should contain 'note' directive");
-    assert!(names.contains(&"admonition"), "Should contain 'admonition' directive");
-    assert!(names.contains(&"code-block"), "Should contain 'code-block' directive");
+    assert!(
+        names.contains(&"admonition"),
+        "Should contain 'admonition' directive"
+    );
+    assert!(
+        names.contains(&"code-block"),
+        "Should contain 'code-block' directive"
+    );
 }
