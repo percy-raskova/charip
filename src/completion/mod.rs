@@ -6,6 +6,7 @@ use crate::{config::Settings, vault::Vault};
 
 use self::callout_completer::CalloutCompleter;
 use self::link_completer::WikiLinkCompleter;
+use self::myst_directive_completer::MystDirectiveCompleter;
 use self::{
     footnote_completer::FootnoteCompleter, link_completer::MarkdownLinkCompleter,
     tag_completer::TagCompleter, unindexed_block_completer::UnindexedBlockCompleter,
@@ -15,6 +16,7 @@ mod callout_completer;
 mod footnote_completer;
 mod link_completer;
 mod matcher;
+mod myst_directive_completer;
 mod tag_completer;
 mod unindexed_block_completer;
 mod util;
@@ -65,11 +67,19 @@ pub fn get_completions(
     };
 
     // I would refactor this if I could figure out generic closures
-    run_completer::<UnindexedBlockCompleter<MarkdownLinkCompleter>>(
+    // MyST directive completion (high priority when in fence context)
+    run_completer::<MystDirectiveCompleter>(
         completion_context,
         params.text_document_position.position.line,
         params.text_document_position.position.character,
     )
+    .or_else(|| {
+        run_completer::<UnindexedBlockCompleter<MarkdownLinkCompleter>>(
+            completion_context,
+            params.text_document_position.position.line,
+            params.text_document_position.position.character,
+        )
+    })
     .or_else(|| {
         run_completer::<UnindexedBlockCompleter<WikiLinkCompleter>>(
             completion_context,
