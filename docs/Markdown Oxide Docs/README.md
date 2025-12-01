@@ -358,3 +358,4 @@ For Helix, all you must do is install the language server's binary to your path.
     ```
 
 </details>
+

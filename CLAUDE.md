@@ -59,12 +59,21 @@ cargo run --release -- config  # Open config file
    - Built by walking directory tree and parsing `.md` files in parallel (`rayon`)
 
 3. **MDFile** (`src/vault/mod.rs`): Parsed representation of a single Markdown file containing:
-   - `references: Vec<Reference>` - outgoing links (wikilinks, markdown links, tags)
+   - `references: Vec<Reference>` - outgoing links (markdown links, tags)
    - `headings`, `indexed_blocks`, `tags`, `footnotes`, `codeblocks`
 
 4. **Reference vs Referenceable**: Core abstraction for link resolution:
-   - `Reference` = source of a link (what points)
-   - `Referenceable` = target of a link (what can be pointed to)
+   - `Reference` = source of a link (what points) - enum variants: `Tag`, `MDFileLink`, `MDHeadingLink`, `MDIndexedBlockLink`, `Footnote`, `LinkRef`
+   - `Referenceable` = target of a link (what can be pointed to) - enum variants: `File`, `Heading`, `IndexedBlock`, `Tag`, `Footnote`, `LinkRefDef`, plus `Unresolved*` variants
+
+5. **Vault Module Structure** (`src/vault/`):
+   - `mod.rs` - Main vault logic, Reference/Referenceable enums
+   - `ast_refs.rs` - AST-based reference extraction
+   - `types.rs` - Core types (`MyRange`, `MDHeading`, `MDTag`, etc.)
+   - `helpers.rs` - Path resolution utilities
+   - `metadata.rs` - Frontmatter parsing
+   - `parsing.rs` - Code block parsing
+   - `tests/` - Test modules
 
 ### Key Modules
 
@@ -87,26 +96,26 @@ cargo run --release -- config  # Open config file
 
 ### Parsing Strategy
 
-Currently **regex-based** parsing for Obsidian syntax. The MyST transition (in progress) will move to **AST-based** parsing via `markdown-rs`:
+AST-based parsing via `markdown-rs` is now the primary path for reference extraction:
 
-| Current | Target (MyST) |
-|---------|---------------|
-| Regex patterns for links/headings | `markdown-rs` AST traversal |
-| HashMap storage | `petgraph` graph structure |
-| Linear reference lookup | Graph neighbor queries |
+- `src/vault/ast_refs.rs` - Extracts markdown links, footnotes, and link references from AST
+- Tags are still extracted separately (not part of CommonMark AST)
+- MyST directives/anchors extracted by `myst_parser.rs`
+
+Future work: `petgraph` for toctree/include graph relationships.
 
 ## Active Development: MyST Support
 
 The project is implementing MyST support in phases:
 
-1. **Phase 1 (Complete)**: Parser rewrite - `myst_parser.rs` handles MyST directives via `markdown-rs`
-2. **Phase 2 (Planned)**: Graph architecture using `petgraph` for toctree/include relationships
-3. **Phase 3 (Planned)**: LSP capabilities for directive completion, reference resolution
+1. **Phase 1 (Complete)**: AST-based reference extraction (`ast_refs.rs`), MyST directive/anchor extraction (`myst_parser.rs`), wikilink removal
+2. **Phase 2 (In Progress)**: Role extraction infrastructure (`{doc}`, `{ref}`, `{term}` roles)
+3. **Phase 3 (Planned)**: LSP capabilities (completion, diagnostics for MyST roles)
 
 Key files for MyST work:
-- `src/myst_parser.rs` - directive parsing logic
-- `PLAN.md` - detailed architectural roadmap (Gemini-generated)
-- `ai-docs/MyST_Implementation_Plan.md` - migration checklist
+- `src/vault/ast_refs.rs` - AST-based reference extraction
+- `src/myst_parser.rs` - MyST directive/anchor parsing
+- `ai-docs/myst-lsp-roadmap.md` - Feature roadmap based on rstnotes analysis
 - `ai-docs/Target_Environment_Analysis.md` - rstnotes-specific requirements
 
 ## VS Code Extension

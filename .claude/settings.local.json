@@ -1,3 +1,19 @@
 {
-  "enableAllProjectMcpServers": false
+  "permissions": {
+    "allow": [
+      "Bash(git log:*)",
+      "Bash(xargs -I{} sh -c 'git log --oneline --ancestry-path {}..main -- src/vault/mod.rs 2>/dev/null | wc -l')",
+      "Bash(cargo run:*)",
+      "Bash(cargo tree:*)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "Bash(cargo doc:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(python3:*)",
+      "Bash(xargs ls:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": false,
+  "outputStyle": "default"
 }
