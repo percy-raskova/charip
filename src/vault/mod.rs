@@ -1214,9 +1214,7 @@ impl Referenceable<'_> {
             Referenceable::UnresovledFile(..)
             | Referenceable::UnresolvedHeading(..)
             | Referenceable::UnresovledIndexedBlock(..) => None,
-            // MystSymbol currently only has line, not full range
-            // TODO: Add range field to MystSymbol for proper LSP navigation
-            Referenceable::MystAnchor(_, _symbol) => None,
+            Referenceable::MystAnchor(_, symbol) => Some(symbol.range),
         }
     }
 

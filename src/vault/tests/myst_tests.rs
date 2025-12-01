@@ -206,7 +206,11 @@ fn test_myst_anchor_as_referenceable() {
         .filter(|r| matches!(r, Referenceable::MystAnchor(..)))
         .collect();
 
-    assert_eq!(anchor_refs.len(), 1, "Should find 1 MystAnchor referenceable");
+    assert_eq!(
+        anchor_refs.len(),
+        1,
+        "Should find 1 MystAnchor referenceable"
+    );
 
     if let Referenceable::MystAnchor(_, symbol) = anchor_refs[0] {
         assert_eq!(symbol.name, "my-target");
@@ -248,7 +252,10 @@ fn test_myst_ref_role_resolves_to_anchor() {
 
     // Verify it's a MystRole reference
     let (path, reference) = &refs[0];
-    assert!(path.ends_with("source.md"), "Reference should be from source.md");
+    assert!(
+        path.ends_with("source.md"),
+        "Reference should be from source.md"
+    );
 
     match reference {
         Reference::MystRole(data, kind, target) => {
