@@ -119,144 +119,20 @@ pub fn rename(vault: &Vault, params: &RenameParams, path: &Path) -> Option<Works
     let references_changes = references
         .into_iter()
         .filter_map(|(path, reference)| {
-            // update references
+            // Use the ReferenceOps trait method to get the rename text
+            let new_text =
+                reference.get_rename_text(&referenceable, &new_ref_name, vault.root_dir())?;
 
-            match reference {
-                Reference::Tag(data) => {
-                    let new_text = format!(
-                        "#{}",
-                        data.reference_text.replacen(
-                            &*referenceable.get_refname(vault.root_dir())?,
-                            &new_ref_name,
-                            1
-                        )
-                    );
-
-                    Some(TextDocumentEdit {
-                        text_document: OptionalVersionedTextDocumentIdentifier {
-                            uri: Url::from_file_path(path).ok()?,
-                            version: None,
-                        },
-                        edits: vec![OneOf::Left(TextEdit {
-                            range: *data.range,
-                            new_text,
-                        })],
-                    })
-                }
-                Reference::MDFileLink(data) if matches!(referenceable, Referenceable::File(..)) => {
-                    let new_text = format!(
-                        "[{}]({})",
-                        data.display_text
-                            .as_ref()
-                            .map(|text| format!("|{text}"))
-                            .unwrap_or_else(|| String::from("")),
-                        new_ref_name,
-                    );
-
-                    Some(TextDocumentEdit {
-                        text_document:
-                            tower_lsp::lsp_types::OptionalVersionedTextDocumentIdentifier {
-                                uri: Url::from_file_path(path).ok()?,
-                                version: None,
-                            },
-                        edits: vec![OneOf::Left(TextEdit {
-                            range: *data.range,
-                            new_text,
-                        })],
-                    })
-                }
-
-                Reference::MDHeadingLink(data, _file, infile)
-                | Reference::MDIndexedBlockLink(data, _file, infile)
-                    if matches!(referenceable, Referenceable::File(..)) =>
-                {
-                    let new_text = format!(
-                        "[{}]({}#{})",
-                        data.display_text
-                            .as_ref()
-                            .map(|text| format!("|{text}"))
-                            .unwrap_or_else(|| String::from("")),
-                        new_ref_name,
-                        infile,
-                    );
-
-                    Some(TextDocumentEdit {
-                        text_document:
-                            tower_lsp::lsp_types::OptionalVersionedTextDocumentIdentifier {
-                                uri: Url::from_file_path(path).ok()?,
-                                version: None,
-                            },
-                        edits: vec![OneOf::Left(TextEdit {
-                            range: *data.range,
-                            new_text,
-                        })],
-                    })
-                }
-                Reference::MDHeadingLink(data, _file, _heading)
-                    if matches!(referenceable, Referenceable::Heading(..)) =>
-                {
-                    let new_text = format!(
-                        "[{}]({})",
-                        data.display_text
-                            .as_ref()
-                            .map(|text| format!("|{text}"))
-                            .unwrap_or_else(|| String::from("")),
-                        new_ref_name,
-                    );
-
-                    Some(TextDocumentEdit {
-                        text_document:
-                            tower_lsp::lsp_types::OptionalVersionedTextDocumentIdentifier {
-                                uri: Url::from_file_path(path).ok()?,
-                                version: None,
-                            },
-                        edits: vec![OneOf::Left(TextEdit {
-                            range: *data.range,
-                            new_text,
-                        })],
-                    })
-                }
-                // Catch-all for unhandled cases
-                Reference::MDHeadingLink(_, _, _) => None,
-                Reference::MDIndexedBlockLink(_, _, _) => None,
-                Reference::MDFileLink(..) => None,
-                Reference::Footnote(..) => None,
-                Reference::LinkRef(_) => None,
-                // MyST role references to anchors: update the target name
-                Reference::MystRole(data, role_kind, _old_target)
-                    if matches!(referenceable, Referenceable::MystAnchor(..))
-                        && matches!(role_kind, MystRoleKind::Ref | MystRoleKind::NumRef) =>
-                {
-                    // Preserve display text if present, update target
-                    let role_name = match role_kind {
-                        MystRoleKind::Ref => "ref",
-                        MystRoleKind::NumRef => "numref",
-                        _ => "ref", // fallback, shouldn't happen
-                    };
-                    let new_text = match &data.display_text {
-                        Some(display) => {
-                            // Format: {role}`display text <new-target>`
-                            format!("{{{}}}`{} <{}>`", role_name, display, new_ref_name)
-                        }
-                        None => {
-                            // Format: {role}`new-target`
-                            format!("{{{}}}`{}`", role_name, new_ref_name)
-                        }
-                    };
-
-                    Some(TextDocumentEdit {
-                        text_document: OptionalVersionedTextDocumentIdentifier {
-                            uri: Url::from_file_path(path).ok()?,
-                            version: None,
-                        },
-                        edits: vec![OneOf::Left(TextEdit {
-                            range: *data.range,
-                            new_text,
-                        })],
-                    })
-                }
-                Reference::MystRole(..) => None, // Other role types don't rename anchors
-            }
+            Some(TextDocumentEdit {
+                text_document: OptionalVersionedTextDocumentIdentifier {
+                    uri: Url::from_file_path(path).ok()?,
+                    version: None,
+                },
+                edits: vec![OneOf::Left(TextEdit {
+                    range: *reference.data().range,
+                    new_text,
+                })],
+            })
         })
         .map(DocumentChangeOperation::Edit);
 

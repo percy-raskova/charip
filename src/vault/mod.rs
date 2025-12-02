@@ -9,8 +9,8 @@ mod tests;
 
 pub use helpers::{get_relative_ref_path, Refname};
 pub use types::{
-    HeadingLevel, MDFootnote, MDHeading, MDIndexedBlock, MDLinkReferenceDefinition, MDTag, MyRange,
-    Rangeable,
+    HeadingLevel, MDFootnote, MDHeading, MDIndexedBlock, MDLinkReferenceDefinition,
+    MDSubstitutionDef, MDTag, MyRange, Rangeable,
 };
 
 use std::{
@@ -354,7 +354,9 @@ impl Vault {
                         Reference::Tag(..)
                         | Reference::Footnote(..)
                         | Reference::LinkRef(..)
-                        | Reference::MystRole(..) => None,
+                        | Reference::MystRole(..)
+                        | Reference::ImageLink(..)
+                        | Reference::Substitution(..) => None, // Substitutions validated separately
                     })
                     .collect();
 
@@ -520,6 +522,16 @@ impl Vault {
                     .map(String::from_iter)
                     .map(Into::into)
             }
+            Referenceable::MathLabel(path, symbol) => {
+                // Show the line where the math directive is defined
+                self.select_line(path, symbol.line as isize)
+                    .map(String::from_iter)
+                    .map(Into::into)
+            }
+            Referenceable::SubstitutionDef(_, sub_def) => {
+                // Show the substitution name and value
+                Some(format!("{}: {}", sub_def.name, sub_def.value).into())
+            }
         }
     }
 
@@ -588,6 +600,8 @@ pub struct MDFile {
     pub myst_symbols: Vec<MystSymbol>,
     /// Glossary terms extracted from `{glossary}` directives
     pub glossary_terms: Vec<GlossaryTerm>,
+    /// Substitution definitions from frontmatter
+    pub substitution_defs: Vec<MDSubstitutionDef>,
 }
 
 impl MDFile {
@@ -628,6 +642,20 @@ impl MDFile {
         };
         let metadata = MDMetadata::new(text);
 
+        // Extract substitution definitions from metadata
+        let substitution_defs = metadata
+            .as_ref()
+            .map(|m| {
+                m.substitutions()
+                    .iter()
+                    .map(|(name, value)| MDSubstitutionDef {
+                        name: name.clone(),
+                        value: value.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         MDFile {
             references: links,
             headings: headings.collect(),
@@ -640,6 +668,7 @@ impl MDFile {
             codeblocks: code_blocks,
             myst_symbols,
             glossary_terms,
+            substitution_defs,
         }
     }
 
@@ -662,6 +691,7 @@ impl MDFile {
             codeblocks: _,
             myst_symbols,
             glossary_terms,
+            substitution_defs,
         } = self;
 
         iter::once(Referenceable::File(&self.path, self))
@@ -696,6 +726,19 @@ impl MDFile {
                 glossary_terms
                     .iter()
                     .map(|term| Referenceable::GlossaryTerm(&self.path, term)),
+            )
+            .chain(
+                myst_symbols
+                    .iter()
+                    .filter(|s| {
+                        s.kind == MystSymbolKind::Directive && s.name == "math" && s.label.is_some()
+                    })
+                    .map(|math_sym| Referenceable::MathLabel(&self.path, math_sym)),
+            )
+            .chain(
+                substitution_defs
+                    .iter()
+                    .map(|sub_def| Referenceable::SubstitutionDef(&self.path, sub_def)),
             )
             .collect()
     }
@@ -742,6 +785,12 @@ pub enum Reference {
     /// MyST role reference: {role}`target`
     /// Fields: (data, role_kind, target)
     MystRole(ReferenceData, MystRoleKind, String),
+    /// Image link: ![alt](path)
+    /// reference_text contains the image path
+    ImageLink(ReferenceData),
+    /// MyST substitution reference: {{variable}}
+    /// reference_text contains the variable name (without braces)
+    Substitution(ReferenceData),
 }
 
 impl Deref for Reference {
@@ -764,6 +813,105 @@ use crate::myst_parser::{self, GlossaryTerm, MystSymbol, MystSymbolKind};
 
 use self::{metadata::MDMetadata, parsing::MDCodeBlock};
 
+/// Trait for common operations on Reference types.
+///
+/// This trait centralizes operations that would otherwise require exhaustive
+/// pattern matching across all Reference variants. When adding a new Reference
+/// variant, implement these methods once rather than updating 30+ match sites.
+///
+/// # Design Rationale
+///
+/// The Reference enum has 9 variants, and operations on references were scattered
+/// across multiple files with exhaustive matches. This trait provides:
+///
+/// 1. **Single point of implementation** - New variants only need trait impl
+/// 2. **Polymorphic dispatch** - Call sites use methods instead of matches
+/// 3. **Self-documenting** - Trait methods describe reference capabilities
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // Before: scattered match statements
+/// match reference {
+///     Reference::Tag(data) => format!("tag diagnostic"),
+///     Reference::MDFileLink(data) => format!("file diagnostic"),
+///     // ... 7 more arms
+/// }
+///
+/// // After: single method call
+/// let message = reference.generate_diagnostic_message(usage_count);
+/// ```
+#[allow(dead_code)] // Trait defined for extensibility; methods used via inherent impl
+pub trait ReferenceOps {
+    /// Get the underlying reference data (range, reference_text, display_text).
+    fn data(&self) -> &ReferenceData;
+
+    /// Returns a static string identifying the reference type.
+    ///
+    /// Useful for diagnostics, logging, and debugging.
+    fn reference_type_name(&self) -> &'static str;
+
+    /// Returns whether this reference type supports hover preview display.
+    ///
+    /// Tags, image links, and substitutions don't resolve to markdown
+    /// referenceables that have preview content.
+    fn has_preview(&self) -> bool;
+
+    /// Generate a diagnostic message for an unresolved reference.
+    ///
+    /// Provides type-specific messages to help users understand exactly what
+    /// type of target is missing.
+    fn generate_diagnostic_message(&self, usage_count: usize) -> String;
+
+    /// Generate the replacement text for a reference when its target is renamed.
+    ///
+    /// This method encapsulates the logic for formatting reference text during
+    /// rename operations. Returns `Some(new_text)` if this reference type should
+    /// be updated when the given referenceable is renamed, or `None` if this
+    /// reference type doesn't apply to the referenceable being renamed.
+    ///
+    /// # Arguments
+    /// * `referenceable` - The target being renamed
+    /// * `new_ref_name` - The new name for the target
+    /// * `root_dir` - The vault root directory (for path resolution)
+    ///
+    /// # Returns
+    /// `Some(String)` with the new reference text, or `None` if not applicable
+    fn get_rename_text(
+        &self,
+        referenceable: &Referenceable,
+        new_ref_name: &str,
+        root_dir: &Path,
+    ) -> Option<String>;
+}
+
+impl ReferenceOps for Reference {
+    fn data(&self) -> &ReferenceData {
+        Reference::data(self)
+    }
+
+    fn reference_type_name(&self) -> &'static str {
+        Reference::reference_type_name(self)
+    }
+
+    fn has_preview(&self) -> bool {
+        Reference::has_preview(self)
+    }
+
+    fn generate_diagnostic_message(&self, usage_count: usize) -> String {
+        Reference::generate_diagnostic_message(self, usage_count)
+    }
+
+    fn get_rename_text(
+        &self,
+        referenceable: &Referenceable,
+        new_ref_name: &str,
+        root_dir: &Path,
+    ) -> Option<String> {
+        Reference::get_rename_text(self, referenceable, new_ref_name, root_dir)
+    }
+}
+
 impl Reference {
     pub fn data(&self) -> &ReferenceData {
         match &self {
@@ -774,6 +922,8 @@ impl Reference {
             MDIndexedBlockLink(data, ..) => data,
             LinkRef(data, ..) => data,
             MystRole(data, ..) => data,
+            ImageLink(data) => data,
+            Substitution(data) => data,
         }
     }
 
@@ -786,6 +936,190 @@ impl Reference {
             MDIndexedBlockLink(..) => matches!(self, MDIndexedBlockLink(..)),
             LinkRef(..) => matches!(self, LinkRef(..)),
             MystRole(..) => matches!(self, MystRole(..)),
+            ImageLink(..) => matches!(self, ImageLink(..)),
+            Substitution(..) => matches!(self, Substitution(..)),
+        }
+    }
+
+    /// Returns a static string identifying the reference type.
+    ///
+    /// This is useful for diagnostics, logging, and debugging without needing
+    /// to match on all variants.
+    #[allow(dead_code)] // Part of ReferenceOps trait, used for extensibility
+    pub fn reference_type_name(&self) -> &'static str {
+        match self {
+            Tag(..) => "tag",
+            Footnote(..) => "footnote",
+            MDFileLink(..) => "file_link",
+            MDHeadingLink(..) => "heading_link",
+            MDIndexedBlockLink(..) => "indexed_block_link",
+            LinkRef(..) => "link_ref",
+            MystRole(..) => "myst_role",
+            ImageLink(..) => "image_link",
+            Substitution(..) => "substitution",
+        }
+    }
+
+    /// Returns whether this reference type supports hover preview display.
+    ///
+    /// Tags, image links, and substitutions don't resolve to markdown
+    /// referenceables that have preview content.
+    pub fn has_preview(&self) -> bool {
+        match self {
+            Tag(_) => false,
+            ImageLink(_) => false,
+            Substitution(_) => false,
+            // All other reference types support preview
+            Footnote(_)
+            | MDFileLink(..)
+            | MDHeadingLink(..)
+            | MDIndexedBlockLink(..)
+            | LinkRef(..)
+            | MystRole(..) => true,
+        }
+    }
+
+    /// Generate a diagnostic message for an unresolved reference.
+    ///
+    /// Provides type-specific messages to help users understand exactly what
+    /// type of target is missing. Appends usage count if > 1.
+    ///
+    /// # Arguments
+    /// * `usage_count` - Number of times this reference appears in the vault
+    pub fn generate_diagnostic_message(&self, usage_count: usize) -> String {
+        let base_message = match self {
+            MystRole(_, kind, target) => match kind {
+                MystRoleKind::Ref | MystRoleKind::NumRef => {
+                    format!("Unresolved reference to anchor '{}'", target)
+                }
+                MystRoleKind::Doc => {
+                    format!("Unresolved document reference '{}'", target)
+                }
+                MystRoleKind::Download => {
+                    format!("Unresolved download reference '{}'", target)
+                }
+                MystRoleKind::Term => {
+                    format!("Unresolved glossary term '{}'", target)
+                }
+                MystRoleKind::Eq => {
+                    format!("Unresolved equation reference '{}'", target)
+                }
+                MystRoleKind::Abbr => {
+                    // Abbreviations don't reference external targets
+                    "Unresolved Reference".to_string()
+                }
+            },
+            ImageLink(data) => {
+                format!("Missing image file '{}'", data.reference_text)
+            }
+            Substitution(data) => {
+                // Note: {{{{ produces {{ and }}}} produces }} in the output
+                format!("Undefined substitution '{{{{{}}}}}'", data.reference_text)
+            }
+            _ => "Unresolved Reference".to_string(),
+        };
+
+        // Append usage count if the reference appears multiple times
+        if usage_count > 1 {
+            format!("{} (used {} times)", base_message, usage_count)
+        } else {
+            base_message
+        }
+    }
+
+    /// Generate the replacement text for a reference when its target is renamed.
+    ///
+    /// This consolidates the rename logic that was previously scattered in rename.rs.
+    /// Each reference type knows how to format itself for different referenceable types.
+    ///
+    /// # Arguments
+    /// * `referenceable` - The target being renamed
+    /// * `new_ref_name` - The new name for the target
+    /// * `root_dir` - The vault root directory (for path resolution)
+    ///
+    /// # Returns
+    /// `Some(String)` with the new reference text, or `None` if not applicable
+    pub fn get_rename_text(
+        &self,
+        referenceable: &Referenceable,
+        new_ref_name: &str,
+        root_dir: &Path,
+    ) -> Option<String> {
+        match self {
+            Tag(data) => {
+                // Tags can only be renamed when the referenceable is a Tag
+                if !matches!(referenceable, Referenceable::Tag(..)) {
+                    return None;
+                }
+                let old_refname = referenceable.get_refname(root_dir)?;
+                let new_text = format!(
+                    "#{}",
+                    data.reference_text.replacen(&*old_refname, new_ref_name, 1)
+                );
+                Some(new_text)
+            }
+            MDFileLink(data) => {
+                // File links only update when renaming Files
+                if !matches!(referenceable, Referenceable::File(..)) {
+                    return None;
+                }
+                let display_part = data
+                    .display_text
+                    .as_ref()
+                    .map(|text| format!("|{text}"))
+                    .unwrap_or_default();
+                Some(format!("[{}]({})", display_part, new_ref_name))
+            }
+            MDHeadingLink(data, _file, infile) | MDIndexedBlockLink(data, _file, infile) => {
+                match referenceable {
+                    Referenceable::File(..) => {
+                        // When renaming a file, update the file part but keep the infile reference
+                        let display_part = data
+                            .display_text
+                            .as_ref()
+                            .map(|text| format!("|{text}"))
+                            .unwrap_or_default();
+                        Some(format!("[{}]({}#{})", display_part, new_ref_name, infile))
+                    }
+                    Referenceable::Heading(..) if matches!(self, MDHeadingLink(..)) => {
+                        // When renaming a heading, update to the new heading name
+                        let display_part = data
+                            .display_text
+                            .as_ref()
+                            .map(|text| format!("|{text}"))
+                            .unwrap_or_default();
+                        Some(format!("[{}]({})", display_part, new_ref_name))
+                    }
+                    _ => None,
+                }
+            }
+            MystRole(data, role_kind, _old_target) => {
+                // MyST roles only update when renaming MystAnchors, and only for Ref/NumRef roles
+                if !matches!(referenceable, Referenceable::MystAnchor(..)) {
+                    return None;
+                }
+                if !matches!(role_kind, MystRoleKind::Ref | MystRoleKind::NumRef) {
+                    return None;
+                }
+                let role_name = match role_kind {
+                    MystRoleKind::Ref => "ref",
+                    MystRoleKind::NumRef => "numref",
+                    _ => return None, // Shouldn't happen due to guard above
+                };
+                let new_text = match &data.display_text {
+                    Some(display) => {
+                        // Format: {role}`display text <new-target>`
+                        format!("{{{}}}`{} <{}>`", role_name, display, new_ref_name)
+                    }
+                    None => {
+                        // Format: {role}`new-target`
+                        format!("{{{}}}`{}`", role_name, new_ref_name)
+                    }
+                };
+                Some(new_text)
+            }
+            // These reference types don't participate in rename operations
+            Footnote(..) | LinkRef(..) | ImageLink(..) | Substitution(..) => None,
         }
     }
 
@@ -826,6 +1160,8 @@ impl Reference {
                 Footnote(_) => false,
                 LinkRef(_) => false,
                 MystRole(..) => false,
+                ImageLink(_) => false, // Images don't reference markdown content
+                Substitution(_) => false, // Substitutions don't reference tags
             },
             &Referenceable::Footnote(path, _footnote) => match self {
                 Footnote(..) => {
@@ -838,6 +1174,8 @@ impl Reference {
                 MDIndexedBlockLink(_, _, _) => false,
                 LinkRef(_) => false,
                 MystRole(..) => false,
+                ImageLink(_) => false,
+                Substitution(_) => false, // Substitutions don't reference footnotes
             },
             &Referenceable::File(..) | &Referenceable::UnresovledFile(..) => match self {
                 MDFileLink(ReferenceData {
@@ -854,6 +1192,8 @@ impl Reference {
                 Footnote(_) => false,
                 LinkRef(_) => false,
                 MystRole(..) => false, // Other role types don't reference files
+                ImageLink(_) => false, // Images reference files on disk, not markdown referenceables
+                Substitution(_) => false, // Substitutions don't reference files
             },
             &Referenceable::Heading(
                 ..,
@@ -884,6 +1224,8 @@ impl Reference {
                 Footnote(_) => false,
                 LinkRef(_) => false,
                 MystRole(..) => false, // Other role types don't reference headings
+                ImageLink(_) => false,
+                Substitution(_) => false, // Substitutions don't reference headings
             },
             Referenceable::LinkRefDef(path, _link_ref) => match self {
                 Tag(_) => false,
@@ -900,6 +1242,8 @@ impl Reference {
                         && file_path == *path
                 }
                 MystRole(..) => false,
+                ImageLink(_) => false,
+                Substitution(_) => false, // Substitutions don't reference link defs
             },
             Referenceable::MystAnchor(_, symbol) => match self {
                 // {ref}`target` and {numref}`target` roles can reference MyST anchors
@@ -914,6 +1258,8 @@ impl Reference {
                 Footnote(_) => false,
                 LinkRef(_) => false,
                 MystRole(..) => false, // Other role types don't reference anchors
+                ImageLink(_) => false,
+                Substitution(_) => false, // Substitutions don't reference anchors
             },
             Referenceable::GlossaryTerm(_, glossary_term) => match self {
                 // {term}`term-name` roles reference glossary terms
@@ -927,6 +1273,41 @@ impl Reference {
                 Footnote(_) => false,
                 LinkRef(_) => false,
                 MystRole(..) => false, // Other role types don't reference glossary terms
+                ImageLink(_) => false,
+                Substitution(_) => false, // Substitutions don't reference glossary terms
+            },
+            Referenceable::MathLabel(_, symbol) => match self {
+                // {eq}`label` roles reference math equation labels
+                MystRole(_, MystRoleKind::Eq, target) => symbol
+                    .label
+                    .as_ref()
+                    .is_some_and(|label| target.to_lowercase() == label.to_lowercase()),
+                Tag(_) => false,
+                MDFileLink(_) => false,
+                MDHeadingLink(_, _, _) => false,
+                MDIndexedBlockLink(_, _, _) => false,
+                Footnote(_) => false,
+                LinkRef(_) => false,
+                MystRole(..) => false, // Other role types don't reference math labels
+                ImageLink(_) => false,
+                Substitution(_) => false, // Substitutions don't reference math labels
+            },
+            // SubstitutionDef: {{variable}} references file-local definitions
+            // IMPORTANT: Substitutions are FILE-LOCAL only
+            Referenceable::SubstitutionDef(def_path, sub_def) => match self {
+                Substitution(data) => {
+                    // Must be in the same file AND have matching name
+                    file_path == def_path.as_path()
+                        && data.reference_text.to_lowercase() == sub_def.name.to_lowercase()
+                }
+                Tag(_) => false,
+                MDFileLink(_) => false,
+                MDHeadingLink(_, _, _) => false,
+                MDIndexedBlockLink(_, _, _) => false,
+                Footnote(_) => false,
+                LinkRef(_) => false,
+                MystRole(..) => false,
+                ImageLink(_) => false,
             },
         }
     }
@@ -1090,6 +1471,12 @@ pub enum Referenceable<'a> {
     MystAnchor(&'a PathBuf, &'a MystSymbol),
     /// Glossary term: term name referenced via `{term}`term``
     GlossaryTerm(&'a PathBuf, &'a GlossaryTerm),
+    /// Math equation label: referenced via `{eq}`label``
+    /// Only created for `{math}` directives that have a `:label:` option
+    MathLabel(&'a PathBuf, &'a MystSymbol),
+    /// Substitution definition from frontmatter: {{variable}}
+    /// **File-local**: substitutions only resolve within the same file
+    SubstitutionDef(&'a PathBuf, &'a MDSubstitutionDef),
 }
 impl Referenceable<'_> {
     /// Gets the generic reference name for a referenceable. This will not include any display text. If trying to determine if text is a reference of a particular referenceable, use the `is_reference` function
@@ -1168,6 +1555,19 @@ impl Referenceable<'_> {
                 infile_ref: Some(glossary_term.term.clone()),
                 path: None,
             }),
+            Referenceable::MathLabel(_, symbol) => {
+                // MathLabel uses the label field from the MystSymbol
+                symbol.label.as_ref().map(|label| Refname {
+                    full_refname: label.clone(),
+                    infile_ref: Some(label.clone()),
+                    path: None,
+                })
+            }
+            Referenceable::SubstitutionDef(_, sub_def) => Some(Refname {
+                full_refname: sub_def.name.clone(),
+                infile_ref: Some(sub_def.name.clone()),
+                path: None,
+            }),
         }
     }
 
@@ -1199,6 +1599,8 @@ impl Referenceable<'_> {
                 MDIndexedBlockLink(_, _, _) => false,
                 LinkRef(_) => false,
                 MystRole(..) => false,
+                ImageLink(_) => false,
+                Substitution(_) => false, // Substitutions don't reference footnotes
             },
             Referenceable::File(..) | Referenceable::UnresovledFile(..) => match reference {
                 MDFileLink(ReferenceData {
@@ -1217,6 +1619,8 @@ impl Referenceable<'_> {
                 Footnote(_) => false,
                 LinkRef(_) => false,
                 MystRole(..) => false, // Other role types don't reference files
+                ImageLink(_) => false, // Images reference files on disk, not markdown referenceables
+                Substitution(_) => false, // Substitutions don't reference files
             },
 
             _ => reference.references(root_dir, reference_path, self),
@@ -1236,6 +1640,8 @@ impl Referenceable<'_> {
             Referenceable::LinkRefDef(path, ..) => path,
             Referenceable::MystAnchor(path, ..) => path,
             Referenceable::GlossaryTerm(path, ..) => path,
+            Referenceable::MathLabel(path, ..) => path,
+            Referenceable::SubstitutionDef(path, ..) => path,
         }
     }
 
@@ -1252,6 +1658,9 @@ impl Referenceable<'_> {
             | Referenceable::UnresovledIndexedBlock(..) => None,
             Referenceable::MystAnchor(_, symbol) => Some(symbol.range),
             Referenceable::GlossaryTerm(_, term) => Some(term.range),
+            Referenceable::MathLabel(_, symbol) => Some(symbol.range),
+            // SubstitutionDef is defined in frontmatter - no specific range
+            Referenceable::SubstitutionDef(_, _) => None,
         }
     }
 

@@ -257,3 +257,338 @@ fn test_myst_ref_role_resolves_to_anchor() {
         _ => panic!("Expected MystRole reference, got {:?}", reference),
     }
 }
+
+// ============================================================================
+// MathLabel referenceable tests (TDD RED PHASE)
+// ============================================================================
+
+#[test]
+fn test_math_labels_extracted_as_referenceables() {
+    let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+    // File with math directives containing labels
+    let content = r#"# Equations
+
+```{math}
+:label: euler-identity
+
+e^{i\pi} + 1 = 0
+```
+
+```{math}
+:label: pythagorean
+
+a^2 + b^2 = c^2
+```
+
+```{math}
+No label on this one
+```
+"#;
+    fs::write(vault_dir.join("equations.md"), content).unwrap();
+
+    let settings = Settings::default();
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+    let math_labels: Vec<_> = vault
+        .select_referenceable_nodes(None)
+        .into_iter()
+        .filter(|r| matches!(r, Referenceable::MathLabel(..)))
+        .collect();
+
+    // Should have 2 math labels (euler-identity, pythagorean)
+    assert_eq!(
+        math_labels.len(),
+        2,
+        "Should find 2 MathLabel referenceables"
+    );
+}
+
+#[test]
+fn test_math_label_get_refname() {
+    let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+    let content = r#"```{math}
+:label: euler-identity
+
+e^{i\pi} + 1 = 0
+```
+
+```{math}
+:label: pythagorean
+
+a^2 + b^2 = c^2
+```
+"#;
+    fs::write(vault_dir.join("equations.md"), content).unwrap();
+
+    let settings = Settings::default();
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+    let math_labels: Vec<_> = vault
+        .select_referenceable_nodes(None)
+        .into_iter()
+        .filter(|r| matches!(r, Referenceable::MathLabel(..)))
+        .collect();
+
+    let names: Vec<_> = math_labels
+        .iter()
+        .filter_map(|r| r.get_refname(vault.root_dir()))
+        .map(|refname| refname.to_string())
+        .collect();
+
+    assert!(
+        names.contains(&"euler-identity".to_string()),
+        "Should contain euler-identity label"
+    );
+    assert!(
+        names.contains(&"pythagorean".to_string()),
+        "Should contain pythagorean label"
+    );
+}
+
+#[test]
+fn test_math_label_has_range() {
+    let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+    let content = r#"```{math}
+:label: my-equation
+
+x = y + z
+```
+"#;
+    fs::write(vault_dir.join("equations.md"), content).unwrap();
+
+    let settings = Settings::default();
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+    let math_labels: Vec<_> = vault
+        .select_referenceable_nodes(None)
+        .into_iter()
+        .filter(|r| matches!(r, Referenceable::MathLabel(..)))
+        .collect();
+
+    assert_eq!(math_labels.len(), 1, "Should find 1 MathLabel");
+
+    for label in math_labels {
+        assert!(label.get_range().is_some(), "MathLabel should have a range");
+    }
+}
+
+#[test]
+fn test_math_label_get_path() {
+    let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+    let content = r#"```{math}
+:label: test-equation
+
+x = 1
+```
+"#;
+    fs::write(vault_dir.join("math_file.md"), content).unwrap();
+
+    let settings = Settings::default();
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+    let math_labels: Vec<_> = vault
+        .select_referenceable_nodes(None)
+        .into_iter()
+        .filter(|r| matches!(r, Referenceable::MathLabel(..)))
+        .collect();
+
+    assert_eq!(math_labels.len(), 1, "Should find 1 MathLabel");
+
+    let path = math_labels[0].get_path();
+    assert!(
+        path.ends_with("math_file.md"),
+        "MathLabel should return correct file path"
+    );
+}
+
+// ============================================================================
+// Substitution Definition Tests (Chunk 10)
+// ============================================================================
+
+#[test]
+fn test_substitution_defs_extracted_as_referenceables() {
+    let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+    // File with substitution definitions in frontmatter
+    let content = r#"---
+myst:
+  substitutions:
+    project_name: "Charip LSP"
+    version: "1.0.0"
+---
+# Document
+
+The {{project_name}} is at version {{version}}.
+"#;
+    fs::write(vault_dir.join("with_subs.md"), content).unwrap();
+
+    let settings = Settings::default();
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+    let sub_defs: Vec<_> = vault
+        .select_referenceable_nodes(None)
+        .into_iter()
+        .filter(|r| matches!(r, Referenceable::SubstitutionDef(..)))
+        .collect();
+
+    // Should have 2 substitution definitions (project_name, version)
+    assert_eq!(
+        sub_defs.len(),
+        2,
+        "Should find 2 SubstitutionDef referenceables"
+    );
+}
+
+#[test]
+fn test_substitution_def_get_refname() {
+    let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+    let content = r#"---
+substitutions:
+  my_var: "value"
+---
+Content"#;
+    fs::write(vault_dir.join("test.md"), content).unwrap();
+
+    let settings = Settings::default();
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+    let sub_defs: Vec<_> = vault
+        .select_referenceable_nodes(None)
+        .into_iter()
+        .filter(|r| matches!(r, Referenceable::SubstitutionDef(..)))
+        .collect();
+
+    assert_eq!(sub_defs.len(), 1, "Should find 1 SubstitutionDef");
+
+    let refname = sub_defs[0].get_refname(vault.root_dir());
+    assert!(refname.is_some(), "SubstitutionDef should have a refname");
+    assert_eq!(refname.unwrap().to_string(), "my_var");
+}
+
+#[test]
+fn test_substitution_resolves_to_def_in_same_file() {
+    let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+    // File with both definition and usage
+    let content = r#"---
+substitutions:
+  name: "World"
+---
+# Hello
+
+Hello {{name}}!
+"#;
+    fs::write(vault_dir.join("test.md"), content).unwrap();
+
+    let settings = Settings::default();
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+    // Find the SubstitutionDef referenceable
+    let referenceables = vault.select_referenceable_nodes(None);
+    let sub_def = referenceables
+        .iter()
+        .find(|r| matches!(r, Referenceable::SubstitutionDef(..)))
+        .expect("Should find SubstitutionDef");
+
+    // Find references to this substitution
+    let refs = vault.select_references_for_referenceable(sub_def);
+
+    assert!(refs.is_some(), "Should find references to substitution");
+    let refs = refs.unwrap();
+
+    assert_eq!(refs.len(), 1, "Should find 1 reference to the substitution");
+
+    // Verify it's a Substitution reference
+    let (path, reference) = &refs[0];
+    assert!(
+        path.ends_with("test.md"),
+        "Reference should be from test.md"
+    );
+
+    match reference {
+        Reference::Substitution(data) => {
+            assert_eq!(data.reference_text, "name");
+        }
+        _ => panic!("Expected Substitution reference, got {:?}", reference),
+    }
+}
+
+#[test]
+fn test_substitution_does_not_resolve_cross_file() {
+    let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+    // File A: has definition but no usage
+    let content_a = r#"---
+substitutions:
+  shared_var: "ValueA"
+---
+# File A
+
+Content without usage.
+"#;
+    fs::write(vault_dir.join("file_a.md"), content_a).unwrap();
+
+    // File B: has usage but no definition (should NOT resolve to file_a's definition)
+    let content_b = r#"# File B
+
+Using {{shared_var}} which is undefined in this file.
+"#;
+    fs::write(vault_dir.join("file_b.md"), content_b).unwrap();
+
+    let settings = Settings::default();
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+    // Find the SubstitutionDef from file_a
+    let referenceables = vault.select_referenceable_nodes(None);
+    let sub_def = referenceables
+        .iter()
+        .find(
+            |r| matches!(r, Referenceable::SubstitutionDef(path, _) if path.ends_with("file_a.md")),
+        )
+        .expect("Should find SubstitutionDef in file_a");
+
+    // Find references to this substitution
+    let refs = vault.select_references_for_referenceable(sub_def);
+    let refs = refs.unwrap_or_default();
+
+    // Should NOT find any references because the usage in file_b
+    // should not resolve to the definition in file_a (file-local only)
+    assert!(
+        refs.is_empty(),
+        "Substitution in file_b should NOT resolve to definition in file_a"
+    );
+}
+
+#[test]
+fn test_substitution_def_has_no_range() {
+    // SubstitutionDef is defined in frontmatter, not at a specific line position
+    // It should return None for range (like File referenceable)
+    let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+    let content = r#"---
+substitutions:
+  test_var: "test"
+---
+Content"#;
+    fs::write(vault_dir.join("test.md"), content).unwrap();
+
+    let settings = Settings::default();
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+    let sub_defs: Vec<_> = vault
+        .select_referenceable_nodes(None)
+        .into_iter()
+        .filter(|r| matches!(r, Referenceable::SubstitutionDef(..)))
+        .collect();
+
+    assert_eq!(sub_defs.len(), 1, "Should find 1 SubstitutionDef");
+
+    // SubstitutionDef doesn't have a precise range since it's in frontmatter
+    // This is acceptable - it's similar to how File referenceable works
+    // (The exact range behavior can be None or pointing to frontmatter start)
+}

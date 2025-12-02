@@ -34,6 +34,8 @@ pub enum RoleType {
     Download,
     /// {term}`glossary-term` - glossary term reference
     Term,
+    /// {eq}`label` - equation reference
+    Eq,
 }
 
 impl RoleType {
@@ -45,6 +47,7 @@ impl RoleType {
             RoleType::Doc => "doc",
             RoleType::Download => "download",
             RoleType::Term => "term",
+            RoleType::Eq => "eq",
         }
     }
 }
@@ -79,10 +82,10 @@ impl<'a> Completer<'a> for MystRoleCompleter<'a> {
         let line_string = String::from_iter(line_chars);
 
         // Pattern: {role}`partial_target
-        // where role is one of: ref, numref, doc, download, term
+        // where role is one of: ref, numref, doc, download, term, eq
         // We match up to the cursor position, target may be incomplete
         static ROLE_TARGET_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\{(?<role>ref|numref|doc|download|term)\}`(?<target>[^`]*)$").unwrap()
+            Regex::new(r"\{(?<role>ref|numref|doc|download|term|eq)\}`(?<target>[^`]*)$").unwrap()
         });
 
         // Get the text up to the cursor position
@@ -103,6 +106,7 @@ impl<'a> Completer<'a> for MystRoleCompleter<'a> {
             "doc" => RoleType::Doc,
             "download" => RoleType::Download,
             "term" => RoleType::Term,
+            "eq" => RoleType::Eq,
             _ => return None,
         };
 
@@ -225,6 +229,17 @@ impl RoleCompletion {
                     kind: CompletionItemKind::TEXT,
                 })
             }
+            // {eq} completes math equation labels
+            (RoleType::Eq, Referenceable::MathLabel(path, symbol)) => {
+                let label = symbol.label.as_ref()?;
+                let detail = get_relative_ref_path(vault.root_dir(), path);
+                Some(RoleCompletion {
+                    label: label.clone(),
+                    insert_text: label.clone(),
+                    detail,
+                    kind: CompletionItemKind::REFERENCE,
+                })
+            }
             _ => None,
         }
     }
@@ -310,9 +325,9 @@ mod tests {
     /// enabling unit tests to verify pattern matching without constructing
     /// a full vault context.
     fn parse_role_pattern(text: &str, cursor_pos: usize) -> Option<(RoleType, String)> {
-        // Pattern includes all supported role types (ref, numref, doc, download, term)
+        // Pattern includes all supported role types (ref, numref, doc, download, term, eq)
         static ROLE_TARGET_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\{(?<role>ref|numref|doc|download|term)\}`(?<target>[^`]*)$").unwrap()
+            Regex::new(r"\{(?<role>ref|numref|doc|download|term|eq)\}`(?<target>[^`]*)$").unwrap()
         });
 
         let text_before_cursor = if cursor_pos <= text.len() {
@@ -332,6 +347,7 @@ mod tests {
             "doc" => RoleType::Doc,
             "download" => RoleType::Download,
             "term" => RoleType::Term,
+            "eq" => RoleType::Eq,
             _ => return None,
         };
 
@@ -432,6 +448,26 @@ mod tests {
             assert_eq!(role_type, RoleType::Doc);
             assert_eq!(partial, "./api/");
         }
+
+        #[test]
+        fn test_eq_role_with_empty_target() {
+            let input = "{eq}`";
+            let result = parse_role_pattern(input, input.len());
+            assert!(result.is_some(), "Should match {{eq}}` pattern");
+            let (role, partial) = result.unwrap();
+            assert_eq!(role, RoleType::Eq);
+            assert_eq!(partial, "");
+        }
+
+        #[test]
+        fn test_eq_role_with_partial_target() {
+            let input = "{eq}`euler";
+            let result = parse_role_pattern(input, input.len());
+            assert!(result.is_some(), "Should match {{eq}}`partial pattern");
+            let (role, partial) = result.unwrap();
+            assert_eq!(role, RoleType::Eq);
+            assert_eq!(partial, "euler");
+        }
     }
 
     mod pattern_rejection {
@@ -512,6 +548,11 @@ mod tests {
             assert_eq!(RoleType::Doc.name(), "doc");
             assert_eq!(RoleType::Download.name(), "download");
         }
+
+        #[test]
+        fn test_eq_role_name() {
+            assert_eq!(RoleType::Eq.name(), "eq");
+        }
     }
 
     // =========================================================================
@@ -590,6 +631,210 @@ mod tests {
         #[test]
         fn test_term_role_name() {
             assert_eq!(RoleType::Term.name(), "term");
+        }
+    }
+
+    // =========================================================================
+    // {eq} Role Completion Tests
+    // =========================================================================
+    //
+    // Tests for {eq} role completion integration with MathLabel referenceables.
+    // The {eq} role should show completions from `{math}` directive `:label:` values.
+
+    mod eq_role_completions {
+        use super::*;
+        use crate::config::Settings;
+        use crate::test_utils::create_test_vault_dir;
+        use crate::vault::{Referenceable, Vault};
+        use std::fs;
+
+        /// Test: {eq} role completions include MathLabel referenceables.
+        ///
+        /// When a vault contains math directives with labels, the {eq} role
+        /// completer should return those labels as completion options.
+        #[test]
+        fn test_eq_role_completions_show_math_labels() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create file with math directives containing labels
+            fs::write(
+                vault_dir.join("equations.md"),
+                r#"# Equations
+
+```{math}
+:label: euler-identity
+
+e^{i\pi} + 1 = 0
+```
+
+```{math}
+:label: pythagorean
+
+a^2 + b^2 = c^2
+```
+"#,
+            )
+            .unwrap();
+
+            let settings = Settings::default();
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            // Get all referenceables from the vault
+            let referenceables = vault.select_referenceable_nodes(None);
+
+            // Find MathLabel referenceables
+            let math_labels: Vec<_> = referenceables
+                .iter()
+                .filter(|r| matches!(r, Referenceable::MathLabel(..)))
+                .collect();
+
+            assert!(
+                !math_labels.is_empty(),
+                "Should have MathLabel referenceables in vault"
+            );
+
+            // Create RoleCompletions for Eq role from MathLabel referenceables
+            let completions: Vec<_> = math_labels
+                .iter()
+                .filter_map(|r| {
+                    RoleCompletion::from_referenceable(
+                        (*r).clone(),
+                        RoleType::Eq,
+                        &vault,
+                        &vault_dir.join("test.md"),
+                    )
+                })
+                .collect();
+
+            // Should have completions for math labels
+            assert_eq!(
+                completions.len(),
+                2,
+                "Should have 2 completions for 2 math labels"
+            );
+
+            // Verify completion labels
+            let labels: Vec<_> = completions.iter().map(|c| c.label.as_str()).collect();
+            assert!(
+                labels.contains(&"euler-identity"),
+                "Should contain euler-identity: {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"pythagorean"),
+                "Should contain pythagorean: {:?}",
+                labels
+            );
+        }
+
+        /// Test: {eq} role completions only show MathLabels, not other referenceables.
+        ///
+        /// The {eq} role should filter out anchors, headings, files, and glossary terms.
+        #[test]
+        fn test_eq_role_filters_non_math_referenceables() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create file with various referenceables (anchors, headings, glossary, math)
+            fs::write(
+                vault_dir.join("mixed.md"),
+                r#"# Mixed Content
+
+(my-anchor)=
+## Section with Anchor
+
+```{math}
+:label: only-equation
+
+x = y
+```
+
+```{glossary}
+API
+  Application Programming Interface.
+```
+"#,
+            )
+            .unwrap();
+
+            let settings = Settings::default();
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            // Get all referenceables
+            let referenceables = vault.select_referenceable_nodes(None);
+
+            // Try to create completions for ALL referenceables with Eq role
+            let eq_completions: Vec<_> = referenceables
+                .iter()
+                .filter_map(|r| {
+                    RoleCompletion::from_referenceable(
+                        (*r).clone(),
+                        RoleType::Eq,
+                        &vault,
+                        &vault_dir.join("test.md"),
+                    )
+                })
+                .collect();
+
+            // Should only have 1 completion (the math label)
+            assert_eq!(
+                eq_completions.len(),
+                1,
+                "{{eq}} role should only show MathLabel completions. Got: {:?}",
+                eq_completions
+            );
+
+            assert_eq!(
+                eq_completions[0].label, "only-equation",
+                "Should only show the math equation label"
+            );
+        }
+
+        /// Test: {eq} completion kind is appropriate.
+        ///
+        /// Math label completions should have an appropriate completion kind.
+        #[test]
+        fn test_eq_completion_item_kind() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            fs::write(
+                vault_dir.join("equations.md"),
+                r#"```{math}
+:label: test-equation
+
+x = 1
+```
+"#,
+            )
+            .unwrap();
+
+            let settings = Settings::default();
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let referenceables = vault.select_referenceable_nodes(None);
+            let math_label = referenceables
+                .iter()
+                .find(|r| matches!(r, Referenceable::MathLabel(..)))
+                .expect("Should find MathLabel");
+
+            let completion = RoleCompletion::from_referenceable(
+                math_label.clone(),
+                RoleType::Eq,
+                &vault,
+                &vault_dir.join("test.md"),
+            );
+
+            assert!(completion.is_some(), "Should create completion");
+            let completion = completion.unwrap();
+
+            // Math labels should use REFERENCE kind (like anchors)
+            assert_eq!(
+                completion.kind,
+                tower_lsp::lsp_types::CompletionItemKind::REFERENCE,
+                "Math label completion should use REFERENCE kind"
+            );
         }
     }
 }

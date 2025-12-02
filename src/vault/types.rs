@@ -195,3 +195,20 @@ impl Rangeable for MDLinkReferenceDefinition {
         &self.range
     }
 }
+
+/// A substitution definition from frontmatter.
+///
+/// MyST substitutions are defined in YAML frontmatter under `substitutions`
+/// or `myst.substitutions` keys. They are referenced in document text via
+/// `{{variable_name}}` syntax.
+///
+/// **Important**: Substitutions are FILE-LOCAL. A `{{foo}}` reference in file A
+/// can only resolve to a definition in file A's frontmatter, not to definitions
+/// in other files.
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct MDSubstitutionDef {
+    /// The variable name (e.g., "project_name")
+    pub name: String,
+    /// The substitution value (e.g., "Charip LSP")
+    pub value: String,
+}

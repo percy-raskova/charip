@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Url};
 
 use crate::{
     config::Settings,
-    vault::{self, MystRoleKind, Reference, Referenceable, Vault},
+    vault::{self, Reference, Referenceable, Vault},
 };
 
 pub fn path_unresolved_references<'a>(
@@ -38,11 +38,67 @@ pub fn path_unresolved_references<'a>(
             let is_unresolved_myst_role =
                 matches!(reference, Reference::MystRole(..)) && matched_option.is_none();
 
-            is_unresolved_md_link || is_unresolved_myst_role
+            // Case 3: Substitutions that don't match ANY SubstitutionDef in the same file
+            // Substitutions are FILE-LOCAL, so we only look for matches in the same file
+            let is_unresolved_substitution =
+                matches!(reference, Reference::Substitution(..)) && matched_option.is_none();
+
+            is_unresolved_md_link || is_unresolved_myst_role || is_unresolved_substitution
         })
         .collect::<Vec<_>>();
 
     Some(unresolved)
+}
+
+/// Find unresolved image references in a file.
+///
+/// Images are validated differently from markdown references:
+/// - They check if the image FILE exists on disk
+/// - Paths are resolved relative to the markdown file containing them
+/// - External URLs (http://, https://, data:) are NOT validated
+fn path_unresolved_images<'a>(vault: &'a Vault, path: &'a Path) -> Vec<(&'a Path, &'a Reference)> {
+    let pathreferences = vault.select_references(Some(path));
+
+    // Get the directory containing the markdown file for relative path resolution
+    let file_dir = path.parent().unwrap_or(vault.root_dir());
+
+    pathreferences
+        .into_par_iter()
+        .filter(|(_ref_path, reference)| {
+            if let Reference::ImageLink(data) = reference {
+                let image_path = &data.reference_text;
+
+                // Skip external URLs (already filtered in extraction, but double-check)
+                if image_path.starts_with("http://")
+                    || image_path.starts_with("https://")
+                    || image_path.starts_with("data:")
+                {
+                    return false;
+                }
+
+                // Resolve the image path
+                // Strip ./ prefix if present
+                let clean_path = image_path.strip_prefix("./").unwrap_or(image_path);
+
+                // Try resolving relative to the file's directory
+                let resolved = file_dir.join(clean_path);
+                if resolved.exists() {
+                    return false; // File exists, not broken
+                }
+
+                // Also try resolving relative to vault root (for absolute-like paths)
+                let from_root = vault.root_dir().join(clean_path);
+                if from_root.exists() {
+                    return false; // File exists, not broken
+                }
+
+                // Image file not found
+                true
+            } else {
+                false // Not an image reference
+            }
+        })
+        .collect()
 }
 
 pub fn diagnostics(
@@ -55,10 +111,12 @@ pub fn diagnostics(
     }
 
     let unresolved = path_unresolved_references(vault, path)?;
+    let unresolved_images = path_unresolved_images(vault, path);
 
     let allreferences = vault.select_references(None);
 
-    let diags: Vec<Diagnostic> = unresolved
+    // Generate diagnostics for unresolved markdown references
+    let mut diags: Vec<Diagnostic> = unresolved
         .into_par_iter()
         .map(|(path, reference)| {
             // Count how many times this same unresolved reference appears
@@ -72,8 +130,8 @@ pub fn diagnostics(
                 })
                 .count();
 
-            // Generate role-specific or generic message
-            let message = generate_diagnostic_message(reference, usage_count);
+            // Generate role-specific or generic message using trait method
+            let message = reference.generate_diagnostic_message(usage_count);
 
             Diagnostic {
                 range: *reference.data().range,
@@ -85,45 +143,36 @@ pub fn diagnostics(
         })
         .collect();
 
+    // Generate diagnostics for unresolved image references
+    let image_diags: Vec<Diagnostic> = unresolved_images
+        .into_par_iter()
+        .map(|(path, reference)| {
+            // Count how many times this same broken image appears
+            let usage_count = allreferences
+                .iter()
+                .filter(|(other_path, otherreference)| {
+                    otherreference.matches_type(reference)
+                        && **other_path == *path
+                        && otherreference.data().reference_text == reference.data().reference_text
+                })
+                .count();
+
+            // Use trait method on Reference
+            let message = reference.generate_diagnostic_message(usage_count);
+
+            Diagnostic {
+                range: *reference.data().range,
+                message,
+                source: Some("charip".into()),
+                severity: Some(DiagnosticSeverity::WARNING), // Images are warnings, not info
+                ..Default::default()
+            }
+        })
+        .collect();
+
+    diags.extend(image_diags);
+
     Some(diags)
-}
-
-/// Generate a diagnostic message for an unresolved reference.
-///
-/// Provides role-specific messages for MyST roles to help users understand
-/// exactly what type of target is missing.
-fn generate_diagnostic_message(reference: &Reference, usage_count: usize) -> String {
-    let base_message = match reference {
-        Reference::MystRole(_, kind, target) => match kind {
-            MystRoleKind::Ref | MystRoleKind::NumRef => {
-                format!("Unresolved reference to anchor '{}'", target)
-            }
-            MystRoleKind::Doc => {
-                format!("Unresolved document reference '{}'", target)
-            }
-            MystRoleKind::Download => {
-                format!("Unresolved download reference '{}'", target)
-            }
-            MystRoleKind::Term => {
-                format!("Unresolved glossary term '{}'", target)
-            }
-            MystRoleKind::Eq => {
-                format!("Unresolved equation reference '{}'", target)
-            }
-            MystRoleKind::Abbr => {
-                // Abbreviations don't reference external targets, so this shouldn't happen
-                "Unresolved Reference".to_string()
-            }
-        },
-        _ => "Unresolved Reference".to_string(),
-    };
-
-    // Append usage count if the reference appears multiple times
-    if usage_count > 1 {
-        format!("{} (used {} times)", base_message, usage_count)
-    } else {
-        base_message
-    }
 }
 
 #[cfg(test)]
@@ -198,6 +247,200 @@ mod tests {
         );
         assert_eq!(diags[0].source, Some("charip".to_string()));
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::INFORMATION));
+    }
+
+    // ========================================================================
+    // Substitution Diagnostic Tests (Chunk 11)
+    // ========================================================================
+
+    /// Test: Undefined substitution produces a diagnostic.
+    #[test]
+    fn test_undefined_substitution_diagnostic() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+        // File with undefined substitution
+        fs::write(vault_dir.join("test.md"), "Hello {{undefined_var}}!").unwrap();
+
+        let settings = Settings {
+            unresolved_diagnostics: true,
+            ..Settings::default()
+        };
+
+        let vault =
+            Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+        let file_path = vault_dir.join("test.md");
+        let uri = Url::from_file_path(&file_path).unwrap();
+
+        let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+        assert!(
+            result.is_some(),
+            "Should return Some when substitution is undefined"
+        );
+        let diags = result.unwrap();
+        assert_eq!(
+            diags.len(),
+            1,
+            "Should have 1 diagnostic for undefined substitution"
+        );
+        assert!(
+            diags[0].message.contains("undefined_var"),
+            "Message should contain the substitution name"
+        );
+    }
+
+    /// Test: Defined substitution produces NO diagnostic.
+    #[test]
+    fn test_defined_substitution_no_diagnostic() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+        // File with defined substitution
+        fs::write(
+            vault_dir.join("test.md"),
+            r#"---
+myst:
+  substitutions:
+    name: "World"
+---
+Hello {{name}}!"#,
+        )
+        .unwrap();
+
+        let settings = Settings {
+            unresolved_diagnostics: true,
+            ..Settings::default()
+        };
+
+        let vault =
+            Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+        let file_path = vault_dir.join("test.md");
+        let uri = Url::from_file_path(&file_path).unwrap();
+
+        let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+        assert!(result.is_some(), "Should return Some");
+        let diags = result.unwrap();
+        assert_eq!(
+            diags.len(),
+            0,
+            "Should have 0 diagnostics when substitution is defined"
+        );
+    }
+
+    /// Test: Substitution defined in another file should still produce diagnostic.
+    /// (Substitutions are FILE-LOCAL)
+    #[test]
+    fn test_substitution_cross_file_produces_diagnostic() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+        // File A: has definition
+        fs::write(
+            vault_dir.join("file_a.md"),
+            r#"---
+substitutions:
+  shared_var: "ValueA"
+---
+# File A"#,
+        )
+        .unwrap();
+
+        // File B: uses the same name but doesn't define it (should be unresolved)
+        fs::write(
+            vault_dir.join("file_b.md"),
+            "Using {{shared_var}} which is not defined in this file.",
+        )
+        .unwrap();
+
+        let settings = Settings {
+            unresolved_diagnostics: true,
+            ..Settings::default()
+        };
+
+        let vault =
+            Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+        let file_b_path = vault_dir.join("file_b.md");
+        let uri = Url::from_file_path(&file_b_path).unwrap();
+
+        let result = diagnostics(&vault, &settings, (&file_b_path, &uri));
+
+        assert!(result.is_some(), "Should return Some");
+        let diags = result.unwrap();
+        assert_eq!(
+            diags.len(),
+            1,
+            "Should have 1 diagnostic - cross-file resolution not allowed"
+        );
+        assert!(
+            diags[0].message.contains("shared_var"),
+            "Message should contain the substitution name"
+        );
+    }
+
+    /// Test: Multiple undefined substitutions produce multiple diagnostics.
+    #[test]
+    fn test_multiple_undefined_substitutions() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+        fs::write(
+            vault_dir.join("test.md"),
+            "{{one}} and {{two}} and {{three}}",
+        )
+        .unwrap();
+
+        let settings = Settings {
+            unresolved_diagnostics: true,
+            ..Settings::default()
+        };
+
+        let vault =
+            Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+        let file_path = vault_dir.join("test.md");
+        let uri = Url::from_file_path(&file_path).unwrap();
+
+        let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+        assert!(result.is_some(), "Should return Some");
+        let diags = result.unwrap();
+        assert_eq!(
+            diags.len(),
+            3,
+            "Should have 3 diagnostics for 3 undefined substitutions"
+        );
+    }
+
+    /// Test: Diagnostic message format for undefined substitution.
+    #[test]
+    fn test_substitution_diagnostic_message_format() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+        fs::write(vault_dir.join("test.md"), "Hello {{world}}!").unwrap();
+
+        let settings = Settings {
+            unresolved_diagnostics: true,
+            ..Settings::default()
+        };
+
+        let vault =
+            Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+        let file_path = vault_dir.join("test.md");
+        let uri = Url::from_file_path(&file_path).unwrap();
+
+        let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+        let diags = result.unwrap();
+        assert_eq!(diags.len(), 1);
+        // Check the message format includes "Undefined substitution" and the name
+        assert!(
+            diags[0].message.contains("Undefined substitution")
+                || diags[0].message.contains("undefined"),
+            "Message should indicate undefined substitution"
+        );
+        assert!(diags[0].message.contains("world"));
     }
 
     /// Test: Diagnostics detect unresolved heading links.
@@ -858,6 +1101,271 @@ The {term}`undefined-term` matters.
                 diags[0].message.contains("2 times"),
                 "Message should indicate role is used 2 times: {}",
                 diags[0].message
+            );
+        }
+
+        // =====================================================================
+        // {eq} Role Diagnostics Tests
+        // =====================================================================
+        //
+        // Tests for {eq} role target resolution against math equation labels.
+        // The {eq} role references `:label:` values defined in `{math}` directives.
+
+        /// Test: Valid {eq} role referencing an existing math label produces no diagnostic.
+        ///
+        /// When a {math} directive has `:label: my-equation`, a reference like
+        /// `{eq}`my-equation`` should resolve successfully with no diagnostic.
+        #[test]
+        fn test_valid_eq_role_no_diagnostic() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create file with math directive and {eq} reference
+            fs::write(
+                vault_dir.join("math.md"),
+                r#"# Equations
+
+```{math}
+:label: my-equation
+
+E = mc^2
+```
+
+See {eq}`my-equation` for details."#,
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("math.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return Some");
+            let diags = result.unwrap();
+            assert_eq!(
+                diags.len(),
+                0,
+                "Valid {{eq}} role should not produce diagnostics. Got: {:?}",
+                diags
+            );
+        }
+
+        /// Test: Broken {eq} role referencing non-existent label produces diagnostic.
+        ///
+        /// When no math label matches the target, a diagnostic should be produced
+        /// with "Unresolved equation reference" in the message.
+        #[test]
+        fn test_broken_eq_role_produces_diagnostic() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create file with {eq} referencing non-existent label
+            fs::write(
+                vault_dir.join("test.md"),
+                r#"See {eq}`nonexistent-equation` for details."#,
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("test.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return diagnostics");
+            let diags = result.unwrap();
+            assert_eq!(
+                diags.len(),
+                1,
+                "Should have 1 diagnostic for broken {{eq}} role"
+            );
+            assert!(
+                diags[0].message.contains("Unresolved equation reference"),
+                "Message should be equation-specific: {}",
+                diags[0].message
+            );
+            assert!(
+                diags[0].message.contains("nonexistent-equation"),
+                "Message should include target name: {}",
+                diags[0].message
+            );
+        }
+
+        /// Test: {eq} role can reference math labels across files.
+        ///
+        /// A {eq} role in one file should resolve to a math label defined
+        /// in another file within the same vault.
+        #[test]
+        fn test_eq_role_cross_file_resolution() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create file with math directive
+            fs::write(
+                vault_dir.join("equations.md"),
+                r#"# Important Equations
+
+```{math}
+:label: euler-identity
+
+e^{i\pi} + 1 = 0
+```
+"#,
+            )
+            .unwrap();
+
+            // Create file with {eq} reference to equation in other file
+            fs::write(
+                vault_dir.join("document.md"),
+                r#"# Document
+
+The most beautiful equation is {eq}`euler-identity`.
+"#,
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("document.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return Some");
+            let diags = result.unwrap();
+            assert_eq!(
+                diags.len(),
+                0,
+                "Cross-file {{eq}} role should resolve. Got: {:?}",
+                diags
+            );
+        }
+
+        /// Test: Multiple {eq} roles with mixed validity.
+        ///
+        /// Multiple {eq} roles in a single file should each be evaluated
+        /// independently - valid ones produce no diagnostic, broken ones do.
+        #[test]
+        fn test_multiple_eq_roles_mixed_validity() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create file with math labels
+            fs::write(
+                vault_dir.join("equations.md"),
+                r#"```{math}
+:label: valid-one
+
+x = 1
+```
+
+```{math}
+:label: valid-two
+
+y = 2
+```
+"#,
+            )
+            .unwrap();
+
+            // Create file with mix of valid and broken {eq} references
+            fs::write(
+                vault_dir.join("test.md"),
+                r#"# Test
+
+See {eq}`valid-one` for the first equation.
+See {eq}`broken-ref` for a missing equation.
+See {eq}`valid-two` for the second equation.
+See {eq}`another-broken` for another missing one.
+"#,
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("test.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return diagnostics");
+            let diags = result.unwrap();
+            assert_eq!(
+                diags.len(),
+                2,
+                "Should have 2 diagnostics for 2 broken {{eq}} roles. Got: {:?}",
+                diags
+            );
+        }
+
+        /// Test: {eq} role matching is case-insensitive.
+        ///
+        /// {eq}`EULER-IDENTITY` should match a label defined as `euler-identity`.
+        #[test]
+        fn test_eq_role_case_insensitive() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            fs::write(
+                vault_dir.join("equations.md"),
+                r#"```{math}
+:label: euler-identity
+
+e^{i\pi} + 1 = 0
+```
+"#,
+            )
+            .unwrap();
+
+            // Reference with different case
+            fs::write(
+                vault_dir.join("test.md"),
+                r#"See {eq}`EULER-IDENTITY` for the equation."#,
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("test.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return Some");
+            let diags = result.unwrap();
+            assert_eq!(
+                diags.len(),
+                0,
+                "Case-insensitive {{eq}} matching should work. Got: {:?}",
+                diags
             );
         }
     }
@@ -2439,6 +2947,369 @@ For command reference, see {doc}`commands`.
                     installation_diags
                 );
             }
+        }
+    }
+
+    // =========================================================================
+    // Image Path Diagnostics Tests
+    // =========================================================================
+    //
+    // Tests for image path validation. Images referenced as ![alt](path)
+    // should produce diagnostics when the file doesn't exist.
+
+    mod image_diagnostics {
+        use super::*;
+
+        /// Test: Broken image reference produces diagnostic when file doesn't exist.
+        ///
+        /// An image like `![Missing](./nonexistent.png)` pointing to a non-existent file
+        /// should produce a diagnostic.
+        #[test]
+        fn test_broken_image_produces_diagnostic() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create file with broken image reference
+            fs::write(
+                vault_dir.join("test.md"),
+                "# Test\n\n![Missing](./nonexistent.png)",
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("test.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return diagnostics");
+            let diags = result.unwrap();
+            assert_eq!(diags.len(), 1, "Should have 1 diagnostic for broken image");
+            assert!(
+                diags[0].message.contains("nonexistent.png"),
+                "Message should mention the missing image: {}",
+                diags[0].message
+            );
+        }
+
+        /// Test: Valid image reference produces no diagnostic when file exists.
+        ///
+        /// An image referencing an existing file should not produce a diagnostic.
+        #[test]
+        fn test_valid_image_no_diagnostic() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create the image file
+            fs::create_dir_all(vault_dir.join("images")).unwrap();
+            fs::write(vault_dir.join("images/photo.png"), "fake image data").unwrap();
+
+            // Create file with valid image reference
+            fs::write(
+                vault_dir.join("test.md"),
+                "# Test\n\n![Photo](images/photo.png)",
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("test.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return Some");
+            let diags = result.unwrap();
+            assert_eq!(
+                diags.len(),
+                0,
+                "Valid image should not produce diagnostics. Got: {:?}",
+                diags
+            );
+        }
+
+        /// Test: External image URLs are not validated.
+        ///
+        /// Images with https:// URLs should NOT produce diagnostics as they're external.
+        #[test]
+        fn test_external_image_no_diagnostic() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create file with external image reference
+            fs::write(
+                vault_dir.join("test.md"),
+                "# Test\n\n![Logo](https://example.com/logo.png)",
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("test.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return Some");
+            let diags = result.unwrap();
+            assert_eq!(
+                diags.len(),
+                0,
+                "External images should not produce diagnostics. Got: {:?}",
+                diags
+            );
+        }
+
+        /// Test: Data URI images are not validated.
+        ///
+        /// Images with data: URIs should NOT produce diagnostics.
+        #[test]
+        fn test_data_uri_image_no_diagnostic() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create file with data URI image
+            fs::write(
+                vault_dir.join("test.md"),
+                "# Test\n\n![Inline](data:image/png;base64,ABC123)",
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("test.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return Some");
+            let diags = result.unwrap();
+            assert_eq!(
+                diags.len(),
+                0,
+                "Data URI images should not produce diagnostics. Got: {:?}",
+                diags
+            );
+        }
+
+        /// Test: Multiple broken images produce multiple diagnostics.
+        #[test]
+        fn test_multiple_broken_images() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create file with multiple broken image references
+            fs::write(
+                vault_dir.join("test.md"),
+                r#"# Test
+
+![Missing 1](missing1.png)
+![Missing 2](missing2.jpg)
+![Missing 3](assets/missing3.gif)
+"#,
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("test.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return diagnostics");
+            let diags = result.unwrap();
+            assert_eq!(
+                diags.len(),
+                3,
+                "Should have 3 diagnostics for 3 broken images. Got: {:?}",
+                diags
+            );
+        }
+
+        /// Test: Mixed valid and broken images only report broken ones.
+        #[test]
+        fn test_mixed_valid_and_broken_images() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create some valid image files
+            fs::create_dir_all(vault_dir.join("images")).unwrap();
+            fs::write(vault_dir.join("images/valid1.png"), "fake image").unwrap();
+            fs::write(vault_dir.join("valid2.jpg"), "fake image").unwrap();
+
+            // Create file with mix of valid and broken images
+            fs::write(
+                vault_dir.join("test.md"),
+                r#"# Test
+
+![Valid 1](images/valid1.png)
+![Broken 1](images/broken.png)
+![Valid 2](valid2.jpg)
+![Broken 2](missing.gif)
+"#,
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("test.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return diagnostics");
+            let diags = result.unwrap();
+            assert_eq!(
+                diags.len(),
+                2,
+                "Should have 2 diagnostics for 2 broken images. Got: {:?}",
+                diags
+            );
+        }
+
+        /// Test: Image diagnostic message contains "image" and filename.
+        #[test]
+        fn test_image_diagnostic_message_format() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create file with broken image reference
+            fs::write(
+                vault_dir.join("test.md"),
+                "# Test\n\n![Alt text](path/to/image.png)",
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("test.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return diagnostics");
+            let diags = result.unwrap();
+            assert_eq!(diags.len(), 1, "Should have 1 diagnostic");
+
+            // Check message format contains "image" and the path
+            assert!(
+                diags[0].message.to_lowercase().contains("image"),
+                "Message should mention 'image': {}",
+                diags[0].message
+            );
+            assert!(
+                diags[0].message.contains("path/to/image.png"),
+                "Message should include the image path: {}",
+                diags[0].message
+            );
+        }
+
+        /// Test: Relative paths with ./ prefix are resolved correctly.
+        #[test]
+        fn test_image_relative_path_dot_slash() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create image file
+            fs::write(vault_dir.join("photo.png"), "fake image").unwrap();
+
+            // Create file with ./ prefix reference
+            fs::write(vault_dir.join("test.md"), "# Test\n\n![Photo](./photo.png)").unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("test.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return Some");
+            let diags = result.unwrap();
+            assert_eq!(
+                diags.len(),
+                0,
+                "Valid ./ prefixed image should not produce diagnostics. Got: {:?}",
+                diags
+            );
+        }
+
+        /// Test: Image in subdirectory from file in same subdirectory.
+        #[test]
+        fn test_image_same_subdirectory() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create subdirectory with markdown and image
+            fs::create_dir_all(vault_dir.join("docs")).unwrap();
+            fs::write(vault_dir.join("docs/diagram.svg"), "fake svg").unwrap();
+            fs::write(
+                vault_dir.join("docs/guide.md"),
+                "# Guide\n\n![Diagram](diagram.svg)",
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("docs/guide.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return Some");
+            let diags = result.unwrap();
+            assert_eq!(
+                diags.len(),
+                0,
+                "Image in same directory should resolve. Got: {:?}",
+                diags
+            );
         }
     }
 }

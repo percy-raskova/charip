@@ -62,30 +62,23 @@ pub fn preview_referenceable(
     })
 }
 
-use Reference::*;
-
 pub fn preview_reference(
     vault: &Vault,
     reference_path: &Path,
     reference: &Reference,
 ) -> Option<MarkupContent> {
-    match reference {
-        Footnote(_)
-        | MDFileLink(..)
-        | MDHeadingLink(..)
-        | MDIndexedBlockLink(..)
-        | LinkRef(..)
-        | MystRole(..) => {
-            let referenceables_for_reference =
-                vault.select_referenceables_for_reference(reference, reference_path);
-
-            let display = referenceable_string(vault, &referenceables_for_reference)?;
-
-            Some(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: display,
-            })
-        }
-        Tag(_) => None,
+    // Use has_preview() method to check if this reference type supports preview
+    if !reference.has_preview() {
+        return None;
     }
+
+    let referenceables_for_reference =
+        vault.select_referenceables_for_reference(reference, reference_path);
+
+    let display = referenceable_string(vault, &referenceables_for_reference)?;
+
+    Some(MarkupContent {
+        kind: MarkupKind::Markdown,
+        value: display,
+    })
 }

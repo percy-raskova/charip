@@ -75,11 +75,20 @@ fn traverse_node(
                 refs.push(reference);
             }
         }
+        Node::Image(image) => {
+            if let Some(reference) = extract_image_link(image, rope) {
+                refs.push(reference);
+            }
+        }
         Node::Text(text_node) => {
             // Extract footnotes from text nodes (when no definition exists,
             // markdown-rs doesn't parse them as FootnoteReference)
             let footnotes = extract_footnotes_from_text(text_node, rope);
             refs.extend(footnotes);
+
+            // Extract MyST substitutions: {{variable_name}}
+            let substitutions = extract_substitutions_from_text(text_node, rope);
+            refs.extend(substitutions);
         }
         Node::FootnoteReference(fref) => {
             if let Some(reference) = extract_footnote_ref(fref, rope) {
@@ -201,6 +210,42 @@ fn extract_md_link(link: &markdown::mdast::Link, _text: &str, rope: &Rope) -> Op
     }
 }
 
+/// Extract a Reference from a markdown Image node.
+///
+/// Handles: `![alt](path)` -> ImageLink
+///
+/// Skips external URLs (http://, https://, data:).
+fn extract_image_link(image: &markdown::mdast::Image, rope: &Rope) -> Option<Reference> {
+    let url = &image.url;
+
+    // Skip external URLs
+    if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("data:") {
+        return None;
+    }
+
+    // Get position for range calculation
+    let position = image.position.as_ref()?;
+    let range = MyRange::from_range(rope, position.start.offset..position.end.offset);
+
+    // URL decode the path
+    let decoded_url = urlencoding::decode(url)
+        .map(|s| s.into_owned())
+        .unwrap_or_else(|_| url.clone());
+
+    // Get alt text as display text
+    let display_text = if image.alt.is_empty() {
+        None
+    } else {
+        Some(image.alt.clone())
+    };
+
+    Some(Reference::ImageLink(ReferenceData {
+        reference_text: decoded_url,
+        display_text,
+        range,
+    }))
+}
+
 /// Extract text content from a list of child nodes.
 fn extract_text_from_children(children: &[Node]) -> Option<String> {
     let text: String = children
@@ -297,6 +342,13 @@ fn extract_link_ref(lref: &markdown::mdast::LinkReference, rope: &Rope) -> Optio
 // MyST Role Extraction
 // ============================================================================
 
+/// Regex for MyST substitutions: {{variable_name}}
+///
+/// Matches `{{name}}` where name starts with a letter or underscore,
+/// followed by alphanumeric characters or underscores.
+static SUBSTITUTION_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\{\{(?<name>[a-zA-Z_][a-zA-Z0-9_]*)\}\}").unwrap());
+
 /// Regex for detecting Text nodes that end with a MyST role prefix: `{rolename}`
 ///
 /// markdown-rs parses `{ref}`target`` as:
@@ -308,6 +360,42 @@ static MYST_ROLE_PREFIX_RE: Lazy<Regex> =
 /// Regex for parsing display text with target format: "display text <target>"
 static ROLE_TARGET_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^(?<display>.+?)\s*<(?<target>[^>]+)>$").unwrap());
+
+/// Extract substitutions from a Text node.
+///
+/// MyST substitutions use `{{variable}}` syntax. This function extracts
+/// them from text nodes (NOT InlineCode or Code nodes, which are handled
+/// by the AST traversal that skips those node types).
+fn extract_substitutions_from_text(
+    text_node: &markdown::mdast::Text,
+    rope: &Rope,
+) -> Vec<Reference> {
+    let position = match &text_node.position {
+        Some(pos) => pos,
+        None => return Vec::new(),
+    };
+
+    let base_offset = position.start.offset;
+    let node_text = &text_node.value;
+
+    SUBSTITUTION_RE
+        .captures_iter(node_text)
+        .filter_map(|capture| {
+            let full_match = capture.get(0)?;
+            let name = capture.name("name")?;
+
+            let start = base_offset + full_match.start();
+            let end = base_offset + full_match.end();
+            let range = MyRange::from_range(rope, start..end);
+
+            Some(Reference::Substitution(ReferenceData {
+                reference_text: name.as_str().to_string(),
+                display_text: None,
+                range,
+            }))
+        })
+        .collect()
+}
 
 /// Parse role kind from role name string.
 fn parse_role_kind(role_name: &str) -> Option<MystRoleKind> {
@@ -868,5 +956,322 @@ See footnote[^1] too.
         assert_eq!(md_count, 1);
         assert_eq!(role_count, 1);
         assert_eq!(footnote_count, 1);
+    }
+
+    // ========================================================================
+    // Image Link Extraction Tests
+    // ========================================================================
+
+    #[test]
+    fn test_image_link_extraction() {
+        let text = "![Example](./images/photo.png)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test.md");
+
+        assert_eq!(refs.len(), 1);
+        assert!(
+            matches!(&refs[0], Reference::ImageLink(_)),
+            "Expected ImageLink, got {:?}",
+            refs[0]
+        );
+        assert_eq!(refs[0].data().reference_text, "./images/photo.png");
+    }
+
+    #[test]
+    fn test_image_skip_external_https() {
+        let text = "![Logo](https://example.com/logo.png)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test.md");
+
+        assert!(refs.is_empty(), "External https images should be skipped");
+    }
+
+    #[test]
+    fn test_image_skip_external_http() {
+        let text = "![Logo](http://example.com/logo.png)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test.md");
+
+        assert!(refs.is_empty(), "External http images should be skipped");
+    }
+
+    #[test]
+    fn test_image_skip_data_uri() {
+        let text = "![Inline](data:image/png;base64,ABC123)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test.md");
+
+        assert!(refs.is_empty(), "Data URIs should be skipped");
+    }
+
+    #[test]
+    fn test_image_with_title() {
+        let text = r#"![Alt text](./image.png "Title")"#;
+        let refs: Vec<_> = extract_references_from_ast(text, "test.md");
+
+        assert_eq!(refs.len(), 1);
+        assert!(
+            matches!(&refs[0], Reference::ImageLink(_)),
+            "Expected ImageLink, got {:?}",
+            refs[0]
+        );
+    }
+
+    #[test]
+    fn test_image_with_alt_text() {
+        let text = "![My alt text](assets/diagram.svg)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test.md");
+
+        assert_eq!(refs.len(), 1);
+        match &refs[0] {
+            Reference::ImageLink(data) => {
+                assert_eq!(data.reference_text, "assets/diagram.svg");
+                assert_eq!(data.display_text, Some("My alt text".to_string()));
+            }
+            _ => panic!("Expected ImageLink"),
+        }
+    }
+
+    #[test]
+    fn test_multiple_images() {
+        let text = "![First](a.png) and ![Second](b.jpg)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test.md");
+
+        assert_eq!(refs.len(), 2);
+        assert!(refs.iter().all(|r| matches!(r, Reference::ImageLink(_))));
+    }
+
+    #[test]
+    fn test_image_range_position() {
+        let text = "Start ![img](photo.png) end";
+        let refs: Vec<_> = extract_references_from_ast(text, "test.md");
+
+        assert_eq!(refs.len(), 1);
+        let range = &refs[0].data().range;
+
+        // ![img](photo.png) starts at position 6 and ends at 23
+        assert_eq!(range.start.line, 0);
+        assert_eq!(range.start.character, 6);
+        assert_eq!(range.end.line, 0);
+        assert_eq!(range.end.character, 23);
+    }
+
+    #[test]
+    fn test_mixed_images_and_links() {
+        let text = "See [link](doc.md) and ![image](photo.png)";
+        let refs: Vec<_> = extract_references_from_ast(text, "test.md");
+
+        assert_eq!(refs.len(), 2);
+
+        let link_count = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::MDFileLink(_)))
+            .count();
+        let image_count = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::ImageLink(_)))
+            .count();
+
+        assert_eq!(link_count, 1);
+        assert_eq!(image_count, 1);
+    }
+
+    // ========================================================================
+    // MyST Substitution Extraction Tests (Chunk 8)
+    // ========================================================================
+
+    #[test]
+    fn test_substitution_extraction() {
+        let text = "The {{project_name}} is ready.";
+        let refs = extract_references_from_ast(text, "test.md");
+        let subs: Vec<_> = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Substitution(_)))
+            .collect();
+
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].data().reference_text, "project_name");
+    }
+
+    #[test]
+    fn test_substitution_in_code_block_ignored() {
+        let text = "```\n{{not_a_sub}}\n```";
+        let refs = extract_references_from_ast(text, "test.md");
+        let subs: Vec<_> = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Substitution(_)))
+            .collect();
+
+        assert!(
+            subs.is_empty(),
+            "Substitutions inside code blocks should be ignored"
+        );
+    }
+
+    #[test]
+    fn test_substitution_in_fenced_code_block_ignored() {
+        let text = "```python\nprint('{{template}}')\n```";
+        let refs = extract_references_from_ast(text, "test.md");
+        let subs: Vec<_> = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Substitution(_)))
+            .collect();
+
+        assert!(
+            subs.is_empty(),
+            "Substitutions inside fenced code blocks should be ignored"
+        );
+    }
+
+    #[test]
+    fn test_multiple_substitutions() {
+        let text = "{{one}} and {{two}} and {{three}}";
+        let refs = extract_references_from_ast(text, "test.md");
+        let subs: Vec<_> = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Substitution(_)))
+            .collect();
+
+        assert_eq!(subs.len(), 3);
+
+        let names: Vec<_> = subs
+            .iter()
+            .map(|s| s.data().reference_text.as_str())
+            .collect();
+        assert!(names.contains(&"one"));
+        assert!(names.contains(&"two"));
+        assert!(names.contains(&"three"));
+    }
+
+    #[test]
+    fn test_substitution_with_underscores() {
+        let text = "The {{my_long_variable_name}} value.";
+        let refs = extract_references_from_ast(text, "test.md");
+        let subs: Vec<_> = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Substitution(_)))
+            .collect();
+
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].data().reference_text, "my_long_variable_name");
+    }
+
+    #[test]
+    fn test_substitution_with_numbers() {
+        let text = "Version {{version_2}} is out.";
+        let refs = extract_references_from_ast(text, "test.md");
+        let subs: Vec<_> = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Substitution(_)))
+            .collect();
+
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].data().reference_text, "version_2");
+    }
+
+    #[test]
+    fn test_substitution_invalid_starting_with_number() {
+        // Substitution names must start with a letter or underscore
+        let text = "Invalid {{123abc}} here.";
+        let refs = extract_references_from_ast(text, "test.md");
+        let subs: Vec<_> = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Substitution(_)))
+            .collect();
+
+        assert!(
+            subs.is_empty(),
+            "Names starting with numbers should be invalid"
+        );
+    }
+
+    #[test]
+    fn test_substitution_range_position() {
+        let text = "Start {{myvar}} end";
+        let refs = extract_references_from_ast(text, "test.md");
+        let subs: Vec<_> = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Substitution(_)))
+            .collect();
+
+        assert_eq!(subs.len(), 1);
+        let range = &subs[0].data().range;
+
+        // {{myvar}} starts at position 6 and ends at 15
+        assert_eq!(range.start.line, 0);
+        assert_eq!(range.start.character, 6);
+        assert_eq!(range.end.line, 0);
+        assert_eq!(range.end.character, 15);
+    }
+
+    #[test]
+    fn test_substitution_multiline() {
+        let text = "First line\n{{var_on_line_two}} on second line";
+        let refs = extract_references_from_ast(text, "test.md");
+        let subs: Vec<_> = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Substitution(_)))
+            .collect();
+
+        assert_eq!(subs.len(), 1);
+        let range = &subs[0].data().range;
+
+        assert_eq!(range.start.line, 1);
+        assert_eq!(range.start.character, 0);
+    }
+
+    #[test]
+    fn test_substitution_in_inline_code_ignored() {
+        let text = "Use `{{template}}` in your config.";
+        let refs = extract_references_from_ast(text, "test.md");
+        let subs: Vec<_> = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Substitution(_)))
+            .collect();
+
+        assert!(
+            subs.is_empty(),
+            "Substitutions inside inline code should be ignored"
+        );
+    }
+
+    #[test]
+    fn test_substitution_mixed_with_other_references() {
+        let text = "The {{project}} version. See [link](doc.md) for more.";
+        let refs = extract_references_from_ast(text, "test.md");
+
+        let sub_count = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Substitution(_)))
+            .count();
+        let link_count = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::MDFileLink(_)))
+            .count();
+
+        assert_eq!(sub_count, 1);
+        assert_eq!(link_count, 1);
+    }
+
+    #[test]
+    fn test_empty_substitution_ignored() {
+        // Empty braces should not be extracted
+        let text = "Empty {{}} should be ignored.";
+        let refs = extract_references_from_ast(text, "test.md");
+        let subs: Vec<_> = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Substitution(_)))
+            .collect();
+
+        assert!(subs.is_empty(), "Empty substitutions should be ignored");
+    }
+
+    #[test]
+    fn test_substitution_adjacent_to_text() {
+        let text = "Hello{{name}}World";
+        let refs = extract_references_from_ast(text, "test.md");
+        let subs: Vec<_> = refs
+            .iter()
+            .filter(|r| matches!(r, Reference::Substitution(_)))
+            .collect();
+
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].data().reference_text, "name");
     }
 }
