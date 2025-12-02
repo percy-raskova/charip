@@ -3,7 +3,7 @@ use std::path::Path;
 
 use tower_lsp::lsp_types::{
     DocumentChangeOperation, DocumentChanges, OneOf, OptionalVersionedTextDocumentIdentifier,
-    RenameParams, ResourceOp, TextDocumentEdit, TextEdit, Url, WorkspaceEdit,
+    RenameParams, TextDocumentEdit, TextEdit, Url, WorkspaceEdit,
 };
 
 use crate::vault::{MystRoleKind, Reference, Referenceable, Vault};
@@ -87,7 +87,9 @@ mod tests {
     use crate::config::Settings;
     use crate::test_utils::create_test_vault_dir;
     use std::fs;
-    use tower_lsp::lsp_types::{Position, TextDocumentIdentifier, TextDocumentPositionParams};
+    use tower_lsp::lsp_types::{
+        Position, ResourceOp, TextDocumentIdentifier, TextDocumentPositionParams,
+    };
 
     /// Helper to create RenameParams
     fn create_rename_params(

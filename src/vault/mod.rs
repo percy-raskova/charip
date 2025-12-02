@@ -1680,6 +1680,7 @@ impl Referenceable<'_> {
     ///
     /// Useful for diagnostics, logging, and debugging without needing
     /// to match on all variants.
+    #[allow(dead_code)] // API for future diagnostics/debugging use
     pub fn referenceable_type_name(&self) -> &'static str {
         match self {
             Referenceable::File(..) => "file",
@@ -1707,6 +1708,7 @@ impl Referenceable<'_> {
     /// - MystAnchor: Changes the anchor name
     ///
     /// Other types (footnotes, indexed blocks, etc.) do not support rename.
+    #[allow(dead_code)] // Documents rename-capable types for future UI hints
     pub fn is_renameable(&self) -> bool {
         matches!(
             self,

@@ -137,8 +137,7 @@ fn extract_md_link(link: &markdown::mdast::Link, _text: &str, rope: &Rope) -> Op
     }
 
     // Get position for range calculation
-    let position = link.position.as_ref()?;
-    let range = MyRange::from_range(rope, position.start.offset..position.end.offset);
+    let range = MyRange::from_ast_position(link.position.as_ref(), rope)?;
 
     // URL decode the path
     let decoded_url = urlencoding::decode(url)
@@ -224,8 +223,7 @@ fn extract_image_link(image: &markdown::mdast::Image, rope: &Rope) -> Option<Ref
     }
 
     // Get position for range calculation
-    let position = image.position.as_ref()?;
-    let range = MyRange::from_range(rope, position.start.offset..position.end.offset);
+    let range = MyRange::from_ast_position(image.position.as_ref(), rope)?;
 
     // URL decode the path
     let decoded_url = urlencoding::decode(url)
@@ -316,8 +314,7 @@ fn extract_footnote_ref(
     fref: &markdown::mdast::FootnoteReference,
     rope: &Rope,
 ) -> Option<Reference> {
-    let position = fref.position.as_ref()?;
-    let range = MyRange::from_range(rope, position.start.offset..position.end.offset);
+    let range = MyRange::from_ast_position(fref.position.as_ref(), rope)?;
 
     Some(Reference::Footnote(ReferenceData {
         reference_text: format!("^{}", fref.identifier),
@@ -328,8 +325,7 @@ fn extract_footnote_ref(
 
 /// Extract a Reference from a LinkReference node.
 fn extract_link_ref(lref: &markdown::mdast::LinkReference, rope: &Rope) -> Option<Reference> {
-    let position = lref.position.as_ref()?;
-    let range = MyRange::from_range(rope, position.start.offset..position.end.offset);
+    let range = MyRange::from_ast_position(lref.position.as_ref(), rope)?;
 
     Some(Reference::LinkRef(ReferenceData {
         reference_text: lref.identifier.clone(),

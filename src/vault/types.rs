@@ -52,6 +52,17 @@ impl MyRange {
         }
         .into()
     }
+
+    /// Creates a `MyRange` from a markdown-rs AST Position using rope for conversion.
+    ///
+    /// This is a convenience wrapper around `from_range` for the common pattern of
+    /// converting AST node positions to LSP ranges.
+    pub fn from_ast_position(
+        position: Option<&markdown::unist::Position>,
+        rope: &Rope,
+    ) -> Option<MyRange> {
+        position.map(|p| MyRange::from_range(rope, p.start.offset..p.end.offset))
+    }
 }
 
 impl std::hash::Hash for MyRange {
