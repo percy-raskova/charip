@@ -111,9 +111,9 @@ fn parse_glossary_content(
     // Helper closure to save the current term and clear state.
     // This eliminates duplication between the mid-parse save and final save.
     let save_current_term = |term: String,
-                                  definition: &mut Vec<String>,
-                                  saved_line: usize,
-                                  terms: &mut Vec<GlossaryTerm>| {
+                             definition: &mut Vec<String>,
+                             saved_line: usize,
+                             terms: &mut Vec<GlossaryTerm>| {
         let definition_text = definition.join(" ");
         // base_line is from markdown-rs (1-indexed). Adding term_line gives
         // the 0-indexed LSP line number for this term.
