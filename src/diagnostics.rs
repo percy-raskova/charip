@@ -5,6 +5,7 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Url};
 
 use crate::{
     config::Settings,
+    frontmatter_schema::FrontmatterSchema,
     vault::{self, Reference, Referenceable, Vault},
 };
 
@@ -101,10 +102,83 @@ fn path_unresolved_images<'a>(vault: &'a Vault, path: &'a Path) -> Vec<(&'a Path
         .collect()
 }
 
+/// Generate diagnostics for frontmatter schema validation errors.
+///
+/// Returns diagnostics if the file has frontmatter and the schema finds violations.
+/// Returns empty vec if:
+/// - No schema is provided
+/// - File has no frontmatter
+/// - Frontmatter is valid
+fn frontmatter_diagnostics(
+    vault: &Vault,
+    path: &Path,
+    schema: Option<&FrontmatterSchema>,
+) -> Vec<Diagnostic> {
+    let Some(schema) = schema else {
+        return vec![];
+    };
+
+    // Get file content from vault
+    let Some(rope) = vault.ropes.get(path) else {
+        return vec![];
+    };
+
+    let text = rope.to_string();
+    let result = schema.validate(&text);
+
+    result
+        .errors
+        .into_iter()
+        .map(|error| {
+            // Use the frontmatter range for positioning, or default to first line
+            let range = result
+                .frontmatter_range
+                .unwrap_or(tower_lsp::lsp_types::Range {
+                    start: tower_lsp::lsp_types::Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: tower_lsp::lsp_types::Position {
+                        line: 0,
+                        character: 1,
+                    },
+                });
+
+            // Create a more user-friendly message
+            let message = if error.instance_path.is_empty() {
+                format!("Frontmatter: {}", error.message)
+            } else {
+                format!("Frontmatter {}: {}", error.instance_path, error.message)
+            };
+
+            Diagnostic {
+                range,
+                message,
+                source: Some("charip".into()),
+                severity: Some(DiagnosticSeverity::WARNING),
+                ..Default::default()
+            }
+        })
+        .collect()
+}
+
+#[allow(dead_code)]
 pub fn diagnostics(
     vault: &Vault,
     settings: &Settings,
     (path, _uri): (&PathBuf, &Url),
+) -> Option<Vec<Diagnostic>> {
+    diagnostics_with_schema(vault, settings, (path, _uri), None)
+}
+
+/// Generate diagnostics with optional frontmatter schema validation.
+///
+/// This is the main diagnostics entry point when frontmatter validation is enabled.
+pub fn diagnostics_with_schema(
+    vault: &Vault,
+    settings: &Settings,
+    (path, _uri): (&PathBuf, &Url),
+    schema: Option<&FrontmatterSchema>,
 ) -> Option<Vec<Diagnostic>> {
     if !settings.unresolved_diagnostics {
         return None;
@@ -171,6 +245,10 @@ pub fn diagnostics(
         .collect();
 
     diags.extend(image_diags);
+
+    // Generate frontmatter validation diagnostics
+    let frontmatter_diags = frontmatter_diagnostics(vault, path, schema);
+    diags.extend(frontmatter_diags);
 
     Some(diags)
 }
@@ -3312,5 +3390,296 @@ For command reference, see {doc}`commands`.
                 diags
             );
         }
+    }
+
+    // ========================================================================
+    // Frontmatter Schema Validation Integration Tests
+    // ========================================================================
+
+    /// Test: Frontmatter validation produces diagnostics for missing required field.
+    #[test]
+    fn test_frontmatter_missing_required_field_diagnostic() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+        // Create schema requiring title
+        let schema_dir = vault_dir.join("_schemas");
+        fs::create_dir(&schema_dir).unwrap();
+        let schema = r#"{
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "required": ["title"],
+            "properties": {
+                "title": { "type": "string" }
+            }
+        }"#;
+        fs::write(schema_dir.join("frontmatter.schema.json"), schema).unwrap();
+
+        // Create file with frontmatter missing required field
+        fs::write(
+            vault_dir.join("test.md"),
+            r#"---
+author: "Test Author"
+---
+# Content"#,
+        )
+        .unwrap();
+
+        let settings = Settings {
+            unresolved_diagnostics: true,
+            frontmatter_schema_path: "_schemas/frontmatter.schema.json".to_string(),
+            ..Settings::default()
+        };
+
+        let vault =
+            Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+        // Load schema
+        let schema_path = vault_dir.join("_schemas/frontmatter.schema.json");
+        let schema = FrontmatterSchema::load(&schema_path);
+
+        let file_path = vault_dir.join("test.md");
+        let uri = Url::from_file_path(&file_path).unwrap();
+
+        let result =
+            diagnostics_with_schema(&vault, &settings, (&file_path, &uri), schema.as_ref());
+
+        assert!(result.is_some(), "Should return Some");
+        let diags = result.unwrap();
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("title") || d.message.contains("required")),
+            "Should have diagnostic about missing title. Got: {:?}",
+            diags
+        );
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.severity == Some(DiagnosticSeverity::WARNING)),
+            "Frontmatter diagnostics should have WARNING severity"
+        );
+    }
+
+    /// Test: Valid frontmatter produces no diagnostics.
+    #[test]
+    fn test_frontmatter_valid_no_diagnostic() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+        // Create schema
+        let schema_dir = vault_dir.join("_schemas");
+        fs::create_dir(&schema_dir).unwrap();
+        let schema = r#"{
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "required": ["title"],
+            "properties": {
+                "title": { "type": "string" }
+            }
+        }"#;
+        fs::write(schema_dir.join("frontmatter.schema.json"), schema).unwrap();
+
+        // Create file with valid frontmatter
+        fs::write(
+            vault_dir.join("test.md"),
+            r#"---
+title: "Valid Title"
+---
+# Content"#,
+        )
+        .unwrap();
+
+        let settings = Settings {
+            unresolved_diagnostics: true,
+            frontmatter_schema_path: "_schemas/frontmatter.schema.json".to_string(),
+            ..Settings::default()
+        };
+
+        let vault =
+            Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+        let schema_path = vault_dir.join("_schemas/frontmatter.schema.json");
+        let schema = FrontmatterSchema::load(&schema_path);
+
+        let file_path = vault_dir.join("test.md");
+        let uri = Url::from_file_path(&file_path).unwrap();
+
+        let result =
+            diagnostics_with_schema(&vault, &settings, (&file_path, &uri), schema.as_ref());
+
+        assert!(result.is_some(), "Should return Some");
+        let diags = result.unwrap();
+        // Should have no frontmatter diagnostics (might have 0 total if no other issues)
+        let frontmatter_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Frontmatter"))
+            .collect();
+        assert!(
+            frontmatter_diags.is_empty(),
+            "Valid frontmatter should produce no schema diagnostics. Got: {:?}",
+            frontmatter_diags
+        );
+    }
+
+    /// Test: No schema means no frontmatter diagnostics.
+    #[test]
+    fn test_frontmatter_no_schema_no_diagnostic() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+        // Create file with frontmatter but no schema
+        fs::write(
+            vault_dir.join("test.md"),
+            r#"---
+invalid_field: 123
+---
+# Content"#,
+        )
+        .unwrap();
+
+        let settings = Settings {
+            unresolved_diagnostics: true,
+            frontmatter_schema_path: "_schemas/nonexistent.json".to_string(),
+            ..Settings::default()
+        };
+
+        let vault =
+            Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+        // Schema doesn't exist, so load returns None
+        let schema_path = vault_dir.join("_schemas/nonexistent.json");
+        let schema = FrontmatterSchema::load(&schema_path);
+        assert!(
+            schema.is_none(),
+            "Schema should not load from nonexistent file"
+        );
+
+        let file_path = vault_dir.join("test.md");
+        let uri = Url::from_file_path(&file_path).unwrap();
+
+        let result =
+            diagnostics_with_schema(&vault, &settings, (&file_path, &uri), schema.as_ref());
+
+        assert!(result.is_some(), "Should return Some");
+        let diags = result.unwrap();
+        let frontmatter_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Frontmatter"))
+            .collect();
+        assert!(
+            frontmatter_diags.is_empty(),
+            "No schema means no frontmatter diagnostics. Got: {:?}",
+            frontmatter_diags
+        );
+    }
+
+    /// Test: Frontmatter with wrong type produces diagnostic.
+    #[test]
+    fn test_frontmatter_wrong_type_diagnostic() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+        // Create schema expecting tags as array
+        let schema_dir = vault_dir.join("_schemas");
+        fs::create_dir(&schema_dir).unwrap();
+        let schema = r#"{
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                }
+            }
+        }"#;
+        fs::write(schema_dir.join("frontmatter.schema.json"), schema).unwrap();
+
+        // Create file with tags as string (wrong type)
+        fs::write(
+            vault_dir.join("test.md"),
+            r#"---
+tags: "not-an-array"
+---
+# Content"#,
+        )
+        .unwrap();
+
+        let settings = Settings {
+            unresolved_diagnostics: true,
+            frontmatter_schema_path: "_schemas/frontmatter.schema.json".to_string(),
+            ..Settings::default()
+        };
+
+        let vault =
+            Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+        let schema_path = vault_dir.join("_schemas/frontmatter.schema.json");
+        let schema = FrontmatterSchema::load(&schema_path);
+
+        let file_path = vault_dir.join("test.md");
+        let uri = Url::from_file_path(&file_path).unwrap();
+
+        let result =
+            diagnostics_with_schema(&vault, &settings, (&file_path, &uri), schema.as_ref());
+
+        assert!(result.is_some(), "Should return Some");
+        let diags = result.unwrap();
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("tags") && d.message.contains("Frontmatter")),
+            "Should have diagnostic about tags type. Got: {:?}",
+            diags
+        );
+    }
+
+    /// Test: File without frontmatter produces no frontmatter diagnostics.
+    #[test]
+    fn test_frontmatter_no_frontmatter_no_diagnostic() {
+        let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+        // Create schema
+        let schema_dir = vault_dir.join("_schemas");
+        fs::create_dir(&schema_dir).unwrap();
+        let schema = r#"{
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "required": ["title"]
+        }"#;
+        fs::write(schema_dir.join("frontmatter.schema.json"), schema).unwrap();
+
+        // Create file WITHOUT frontmatter
+        fs::write(
+            vault_dir.join("test.md"),
+            "# Just a heading\n\nNo frontmatter.",
+        )
+        .unwrap();
+
+        let settings = Settings {
+            unresolved_diagnostics: true,
+            frontmatter_schema_path: "_schemas/frontmatter.schema.json".to_string(),
+            ..Settings::default()
+        };
+
+        let vault =
+            Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+        let schema_path = vault_dir.join("_schemas/frontmatter.schema.json");
+        let schema = FrontmatterSchema::load(&schema_path);
+
+        let file_path = vault_dir.join("test.md");
+        let uri = Url::from_file_path(&file_path).unwrap();
+
+        let result =
+            diagnostics_with_schema(&vault, &settings, (&file_path, &uri), schema.as_ref());
+
+        assert!(result.is_some(), "Should return Some");
+        let diags = result.unwrap();
+        let frontmatter_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Frontmatter"))
+            .collect();
+        assert!(
+            frontmatter_diags.is_empty(),
+            "File without frontmatter should have no frontmatter diagnostics. Got: {:?}",
+            frontmatter_diags
+        );
     }
 }
