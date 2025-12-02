@@ -17,15 +17,18 @@ This project embodies that principle: rather than adapting PKM tools built for O
 ```{admonition} Current Status
 :class: tip
 
-All core MyST features implemented:
+All core MyST features implemented with graph-based architecture:
 - Directive/role/anchor extraction
 - Go-to-definition and find references
 - Directive and role target autocomplete
 - Anchor rename from roles
-- Glossary term completion
-- Broken reference diagnostics
+- Glossary term and equation completion
+- Broken reference and image diagnostics
+- Include cycle detection
+- Orphan document detection
+- Transitive dependency analysis
 
-**194 tests passing**
+**347 tests passing**
 ```
 
 ## Documentation
@@ -53,6 +56,7 @@ development/target-environment
 :maxdepth: 2
 :caption: Reference
 
+reference/capabilities
 reference/myst-spec
 reference/features
 reference/configuration
