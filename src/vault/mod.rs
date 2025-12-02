@@ -340,7 +340,7 @@ impl Vault {
                             let mut path = self.root_dir().clone();
                             path.push(&reference.data().reference_text);
 
-                            Some(Referenceable::UnresovledFile(path, &data.reference_text))
+                            Some(Referenceable::UnresolvedFile(path, &data.reference_text))
                         }
                         Reference::MDHeadingLink(_data, end_path, heading) => {
                             let mut path = self.root_dir().clone();
@@ -352,7 +352,7 @@ impl Vault {
                             let mut path = self.root_dir().clone();
                             path.push(end_path);
 
-                            Some(Referenceable::UnresovledIndexedBlock(path, end_path, index))
+                            Some(Referenceable::UnresolvedIndexedBlock(path, end_path, index))
                         }
                         Reference::Tag(..)
                         | Reference::Footnote(..)
@@ -510,9 +510,9 @@ impl Vault {
                 )
             }
             Referenceable::Tag(_, _) => None,
-            Referenceable::UnresovledFile(_, _) => None,
+            Referenceable::UnresolvedFile(_, _) => None,
             Referenceable::UnresolvedHeading(_, _, _) => None,
-            Referenceable::UnresovledIndexedBlock(_, _, _) => None,
+            Referenceable::UnresolvedIndexedBlock(_, _, _) => None,
             Referenceable::MystAnchor(path, symbol) => {
                 // Show the line where the anchor is defined
                 self.select_line(path, symbol.line as isize)
@@ -1180,7 +1180,7 @@ impl Reference {
                 ImageLink(_) => false,
                 Substitution(_) => false, // Substitutions don't reference footnotes
             },
-            &Referenceable::File(..) | &Referenceable::UnresovledFile(..) => match self {
+            &Referenceable::File(..) | &Referenceable::UnresolvedFile(..) => match self {
                 MDFileLink(ReferenceData {
                     reference_text: file_ref_text,
                     ..
@@ -1212,7 +1212,7 @@ impl Reference {
                     index: infile_ref, ..
                 },
             )
-            | &Referenceable::UnresovledIndexedBlock(.., infile_ref) => match self {
+            | &Referenceable::UnresolvedIndexedBlock(.., infile_ref) => match self {
                 MDHeadingLink(.., file_ref_text, link_infile_ref)
                 | MDIndexedBlockLink(.., file_ref_text, link_infile_ref) => {
                     matches_path_or_file(file_ref_text, referenceable.get_refname(root_dir))
@@ -1465,10 +1465,10 @@ pub enum Referenceable<'a> {
     Tag(&'a PathBuf, &'a MDTag),
     Footnote(&'a PathBuf, &'a MDFootnote),
     // TODO: Get rid of useless path here
-    UnresovledFile(PathBuf, &'a String),
+    UnresolvedFile(PathBuf, &'a String),
     UnresolvedHeading(PathBuf, &'a String, &'a String),
     /// full path, link path, index (without ^)
-    UnresovledIndexedBlock(PathBuf, &'a String, &'a String),
+    UnresolvedIndexedBlock(PathBuf, &'a String, &'a String),
     LinkRefDef(&'a PathBuf, &'a MDLinkReferenceDefinition),
     /// MyST anchor target: `(my-target)=`
     MystAnchor(&'a PathBuf, &'a MystSymbol),
@@ -1530,13 +1530,13 @@ impl Referenceable<'_> {
                 })
             }
 
-            Referenceable::UnresovledFile(_, path) => Some(Refname {
+            Referenceable::UnresolvedFile(_, path) => Some(Refname {
                 full_refname: path.to_string(),
                 path: Some(path.to_string()),
                 ..Default::default()
             }),
 
-            Referenceable::UnresovledIndexedBlock(_, path, index) => {
+            Referenceable::UnresolvedIndexedBlock(_, path, index) => {
                 Some(format!("{}#^{}", path, index)).map(|full_ref| Refname {
                     full_refname: full_ref,
                     path: path.to_string().into(),
@@ -1605,7 +1605,7 @@ impl Referenceable<'_> {
                 ImageLink(_) => false,
                 Substitution(_) => false, // Substitutions don't reference footnotes
             },
-            Referenceable::File(..) | Referenceable::UnresovledFile(..) => match reference {
+            Referenceable::File(..) | Referenceable::UnresolvedFile(..) => match reference {
                 MDFileLink(ReferenceData {
                     reference_text: file_ref_text,
                     ..
@@ -1637,8 +1637,8 @@ impl Referenceable<'_> {
             Referenceable::IndexedBlock(path, _) => path,
             Referenceable::Tag(path, _) => path,
             Referenceable::Footnote(path, _) => path,
-            Referenceable::UnresovledIndexedBlock(path, ..) => path,
-            Referenceable::UnresovledFile(path, ..) => path,
+            Referenceable::UnresolvedIndexedBlock(path, ..) => path,
+            Referenceable::UnresolvedFile(path, ..) => path,
             Referenceable::UnresolvedHeading(path, ..) => path,
             Referenceable::LinkRefDef(path, ..) => path,
             Referenceable::MystAnchor(path, ..) => path,
@@ -1656,9 +1656,9 @@ impl Referenceable<'_> {
             Referenceable::Tag(_, tag) => Some(tag.range),
             Referenceable::Footnote(_, footnote) => Some(footnote.range),
             Referenceable::LinkRefDef(_, refdef) => Some(refdef.range),
-            Referenceable::UnresovledFile(..)
+            Referenceable::UnresolvedFile(..)
             | Referenceable::UnresolvedHeading(..)
-            | Referenceable::UnresovledIndexedBlock(..) => None,
+            | Referenceable::UnresolvedIndexedBlock(..) => None,
             Referenceable::MystAnchor(_, symbol) => Some(symbol.range),
             Referenceable::GlossaryTerm(_, term) => Some(term.range),
             Referenceable::MathLabel(_, symbol) => Some(symbol.range),
@@ -1671,8 +1671,8 @@ impl Referenceable<'_> {
         matches!(
             self,
             Referenceable::UnresolvedHeading(..)
-                | Referenceable::UnresovledFile(..)
-                | Referenceable::UnresovledIndexedBlock(..)
+                | Referenceable::UnresolvedFile(..)
+                | Referenceable::UnresolvedIndexedBlock(..)
         )
     }
 
@@ -1687,9 +1687,9 @@ impl Referenceable<'_> {
             Referenceable::IndexedBlock(..) => "indexed_block",
             Referenceable::Tag(..) => "tag",
             Referenceable::Footnote(..) => "footnote",
-            Referenceable::UnresovledFile(..) => "unresolved_file",
+            Referenceable::UnresolvedFile(..) => "unresolved_file",
             Referenceable::UnresolvedHeading(..) => "unresolved_heading",
-            Referenceable::UnresovledIndexedBlock(..) => "unresolved_indexed_block",
+            Referenceable::UnresolvedIndexedBlock(..) => "unresolved_indexed_block",
             Referenceable::LinkRefDef(..) => "link_ref_def",
             Referenceable::MystAnchor(..) => "myst_anchor",
             Referenceable::GlossaryTerm(..) => "glossary_term",

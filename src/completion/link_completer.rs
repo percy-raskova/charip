@@ -422,7 +422,7 @@ impl LinkCompletion<'_> {
                     })
                     .collect(),
                 ),
-                Referenceable::UnresovledFile(_, file) => Some(
+                Referenceable::UnresolvedFile(_, file) => Some(
                     once(Unresolved {
                         match_string: file.clone(),
                         infile_ref: None,
@@ -438,7 +438,7 @@ impl LinkCompletion<'_> {
                     })
                     .collect(),
                 ),
-                Referenceable::UnresovledIndexedBlock(_, s1, s2) => Some(
+                Referenceable::UnresolvedIndexedBlock(_, s1, s2) => Some(
                     once(Unresolved {
                         match_string: format!("{}#^{}", s1, s2),
                         infile_ref: Some(format!("^{}", s2)),
@@ -657,7 +657,7 @@ impl MDDailyNote<'_> {
         completer: &impl LinkCompleter<'a>,
     ) -> Option<MDDailyNote<'a>> {
         let (filerefname, filter_refname) = (match referenceable {
-            Referenceable::File(&ref path, _) | Referenceable::UnresovledFile(ref path, _) => {
+            Referenceable::File(&ref path, _) | Referenceable::UnresolvedFile(ref path, _) => {
                 let filename = path.file_name();
                 let dailynote_format = &completer.settings().dailynote;
                 let (date, filename) = filename.and_then(|filename| {
@@ -706,7 +706,7 @@ impl MDDailyNote<'_> {
         let mut path = completer.vault().root_dir().to_path_buf();
         path.push(format!("{}.md", self.ref_name));
 
-        let unresolved_file = Referenceable::UnresovledFile(path.to_path_buf(), &self.ref_name);
+        let unresolved_file = Referenceable::UnresolvedFile(path.to_path_buf(), &self.ref_name);
 
         unresolved_file
     }

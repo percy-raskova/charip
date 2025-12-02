@@ -26,8 +26,8 @@ pub fn path_unresolved_references<'a>(
             let is_unresolved_md_link = matched_option.is_some_and(|matched| {
                 matches!(
                     matched,
-                    Referenceable::UnresovledIndexedBlock(..)
-                        | Referenceable::UnresovledFile(..)
+                    Referenceable::UnresolvedIndexedBlock(..)
+                        | Referenceable::UnresolvedFile(..)
                         | Referenceable::UnresolvedHeading(..)
                 )
             });

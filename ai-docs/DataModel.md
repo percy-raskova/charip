@@ -58,9 +58,9 @@ pub enum Referenceable<'a> {
     Tag(&'a PathBuf, &'a MDTag),
     Footnote(&'a PathBuf, &'a MDFootnote),
     // Unresolved variants for links pointing to non-existent targets
-    UnresovledFile(PathBuf, &'a String),
+    UnresolvedFile(PathBuf, &'a String),
     UnresolvedHeading(PathBuf, &'a String, &'a String),
-    UnresovledIndexedBlock(PathBuf, &'a String, &'a String),
+    UnresolvedIndexedBlock(PathBuf, &'a String, &'a String),
     LinkRefDef(&'a PathBuf, &'a MDLinkReferenceDefinition),
 }
 ```
