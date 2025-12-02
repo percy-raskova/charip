@@ -573,16 +573,13 @@ impl LanguageServer for Backend {
         let timer = std::time::Instant::now();
 
         let path = params_position_path!(params)?;
-        let files = self
-            .bind_opened_files(|files| Ok(files.clone().into_iter().collect::<Box<[_]>>()))
-            .await?;
 
         let Ok(settings) = self.bind_settings(|settings| Ok(settings.to_owned())).await else {
             return Err(Error::new(ErrorCode::ServerError(2)));
         }; // TODO: this is bad
 
         let res = self
-            .bind_vault(|vault| Ok(get_completions(vault, &files, &params, &path, &settings)))
+            .bind_vault(|vault| Ok(get_completions(vault, &params, &path, &settings)))
             .await;
 
         let elapsed = timer.elapsed();

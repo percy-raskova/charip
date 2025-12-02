@@ -7,12 +7,12 @@ use tower_lsp::lsp_types::{
 
 use crate::{
     ui::preview_referenceable,
-    vault::{get_obsidian_ref_path, Block, Referenceable},
+    vault::{get_relative_ref_path, Block, Referenceable},
 };
 use nanoid::nanoid;
 
 use super::{
-    link_completer::{LinkCompleter, MarkdownLinkCompleter, WikiLinkCompleter},
+    link_completer::{LinkCompleter, MarkdownLinkCompleter},
     matcher::{fuzzy_match_completions, Matchable},
     Completable, Completer,
 };
@@ -101,36 +101,6 @@ impl<'a> Completer<'a> for UnindexedBlockCompleter<'a, MarkdownLinkCompleter<'a>
     }
 }
 
-impl<'a> Completer<'a> for UnindexedBlockCompleter<'a, WikiLinkCompleter<'a>> {
-    fn construct(context: super::Context<'a>, line: usize, character: usize) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        let wiki_link_completer = WikiLinkCompleter::construct(context, line, character)?;
-
-        UnindexedBlockCompleter::from_link_completer(wiki_link_completer)
-    }
-
-    fn completions(&self) -> Vec<impl Completable<'a, Self>>
-    where
-        Self: Sized,
-    {
-        let completables = self.completables();
-        let filter_text = self.grep_match_text();
-        let matches = fuzzy_match_completions(
-            &filter_text,
-            completables,
-            &self.link_completer.settings().case_matching,
-        );
-
-        matches
-    }
-
-    type FilterParams = <WikiLinkCompleter<'a> as Completer<'a>>::FilterParams;
-    fn completion_filter_text(&self, params: Self::FilterParams) -> String {
-        self.link_completer.completion_filter_text(params)
-    }
-}
 
 struct UnindexedBlock<'a>(Block<'a>);
 
@@ -143,7 +113,7 @@ impl<'a> UnindexedBlock<'a> {
         let rand_id = &completer.new_id;
 
         let path_ref =
-            get_obsidian_ref_path(completer.link_completer.vault().root_dir(), self.0.file)?;
+            get_relative_ref_path(completer.link_completer.vault().root_dir(), self.0.file)?;
         let url = Url::from_file_path(self.0.file).ok()?;
 
         let block = self.0;
@@ -280,32 +250,6 @@ impl<'a> Completable<'a, UnindexedBlockCompleter<'a, MarkdownLinkCompleter<'a>>>
     }
 }
 
-impl<'a> Completable<'a, UnindexedBlockCompleter<'a, WikiLinkCompleter<'a>>>
-    for UnindexedBlock<'a>
-{
-    fn completions(
-        &self,
-        completer: &UnindexedBlockCompleter<'a, WikiLinkCompleter<'a>>,
-    ) -> Option<CompletionItem> {
-        let (refname, partial_completion) = self.partial_completion(completer)?;
-
-        let binding = completer.link_completer.entered_refname();
-        let display = &binding.trim();
-
-        Some(CompletionItem {
-            text_edit: Some(
-                completer
-                    .link_completer
-                    .completion_text_edit(Some(&format!("${{1:{}}}", display)), &refname),
-            ),
-            filter_text: Some(
-                completer.completion_filter_text(&completer.link_completer.entered_refname()),
-            ),
-            insert_text_format: Some(InsertTextFormat::SNIPPET),
-            ..partial_completion
-        })
-    }
-}
 
 impl Matchable for UnindexedBlock<'_> {
     fn match_string(&self) -> &str {

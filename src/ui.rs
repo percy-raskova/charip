@@ -3,7 +3,7 @@ use std::path::Path;
 use itertools::Itertools;
 use tower_lsp::lsp_types::{MarkupContent, MarkupKind};
 
-use crate::vault::{get_obsidian_ref_path, Preview, Reference, Referenceable, Vault};
+use crate::vault::{get_relative_ref_path, Preview, Reference, Referenceable, Vault};
 
 fn referenceable_string(vault: &Vault, referenceables: &[Referenceable]) -> Option<String> {
     let referenceable = referenceables.first()?;
@@ -36,7 +36,7 @@ fn referenceable_string(vault: &Vault, referenceables: &[Referenceable]) -> Opti
                     vault.select_line(path, reference.data().range.start.line as isize)?,
                 );
 
-                let path = get_obsidian_ref_path(vault.root_dir(), path)?;
+                let path = get_relative_ref_path(vault.root_dir(), path)?;
 
                 Some(format!("- `{}`: `{}`", path, line)) // and select indented list
             })
@@ -54,7 +54,7 @@ pub fn preview_referenceable(
     vault: &Vault,
     referenceable: &Referenceable,
 ) -> Option<MarkupContent> {
-    let display = referenceable_string(vault, &[referenceable.clone()])?;
+    let display = referenceable_string(vault, std::slice::from_ref(referenceable))?;
 
     Some(MarkupContent {
         kind: MarkupKind::Markdown,

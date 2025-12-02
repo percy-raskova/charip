@@ -1,11 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use tower_lsp::lsp_types::{CompletionItem, CompletionList, CompletionParams, CompletionResponse};
 
 use crate::{config::Settings, vault::Vault};
 
 use self::callout_completer::CalloutCompleter;
-use self::link_completer::WikiLinkCompleter;
 use self::myst_directive_completer::MystDirectiveCompleter;
 use self::myst_role_completer::MystRoleCompleter;
 use self::{
@@ -26,7 +25,6 @@ mod util;
 #[derive(Clone, Copy)]
 pub struct Context<'a> {
     vault: &'a Vault,
-    opened_files: &'a [PathBuf],
     path: &'a Path,
     settings: &'a Settings,
 }
@@ -56,14 +54,12 @@ type LineRange<T> = std::ops::Range<T>;
 
 pub fn get_completions(
     vault: &Vault,
-    initial_completion_files: &[PathBuf],
     params: &CompletionParams,
     path: &Path,
     config: &Settings,
 ) -> Option<CompletionResponse> {
     let completion_context = Context {
         vault,
-        opened_files: initial_completion_files,
         path,
         settings: config,
     };
@@ -91,21 +87,7 @@ pub fn get_completions(
         )
     })
     .or_else(|| {
-        run_completer::<UnindexedBlockCompleter<WikiLinkCompleter>>(
-            completion_context,
-            params.text_document_position.position.line,
-            params.text_document_position.position.character,
-        )
-    })
-    .or_else(|| {
         run_completer::<MarkdownLinkCompleter>(
-            completion_context,
-            params.text_document_position.position.line,
-            params.text_document_position.position.character,
-        )
-    })
-    .or_else(|| {
-        run_completer::<WikiLinkCompleter>(
             completion_context,
             params.text_document_position.position.line,
             params.text_document_position.position.character,
@@ -133,198 +115,6 @@ pub fn get_completions(
         )
     })
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use itertools::Itertools;
-//
-//     use super::{get_wikilink_index, CompletableMDLink, CompletableTag, get_completable_tag};
-//
-//     #[test]
-//     fn test_index() {
-//         let s = "test [[linjfkdfjds]]";
-//
-//         let expected = 6;
-//
-//         let actual = get_wikilink_index(&s.chars().collect(), 10);
-//
-//         assert_eq!(Some(expected), actual);
-//
-//         assert_eq!(Some("lin"), s.get(expected + 1..10));
-//     }
-//
-//     #[test]
-//     fn test_partial_mdlink() {
-//         let line = "This is line [display](partialpa"; // (th)
-//
-//         let expected = Some(CompletableMDLink {
-//             partial: ("[display](partialpa".to_string(), 13..32),
-//             display: ("display".to_string(), 14..21),
-//             path: ("partialpa".to_string(), 23..32),
-//             infile_ref: None,
-//             full_range: 13..32,
-//         });
-//
-//         let actual = super::get_completable_mdlink(&line.chars().collect(), 32);
-//
-//         assert_eq!(actual, expected);
-//
-//         let line = "This is line [display](partialpath)"; // (th)
-//
-//         let expected = Some(CompletableMDLink {
-//             partial: ("[display](partialpa".to_string(), 13..32),
-//             display: ("display".to_string(), 14..21),
-//             path: ("partialpa".to_string(), 23..32),
-//             infile_ref: None,
-//             full_range: 13..35,
-//         });
-//
-//         let actual = super::get_completable_mdlink(&line.chars().collect(), 32);
-//
-//         assert_eq!(actual, expected);
-//
-//         let line = "[disp](pp) This is line [display](partialpath)"; // (th)
-//
-//         let expected = Some(CompletableMDLink {
-//             partial: ("[display](partialpa".to_string(), 24..43),
-//             display: ("display".to_string(), 25..32),
-//             path: ("partialpa".to_string(), 34..43),
-//             infile_ref: None,
-//             full_range: 24..46,
-//         });
-//
-//         let actual = super::get_completable_mdlink(&line.chars().collect(), 43);
-//
-//         assert_eq!(actual, expected);
-//
-//         let line = "[disp](pp) This is line [display](partialpath)"; // (th)
-//
-//         let expected = Some(CompletableMDLink {
-//             partial: ("[display](partialpath".to_string(), 24..45),
-//             display: ("display".to_string(), 25..32),
-//             path: ("partialpath".to_string(), 34..45),
-//             infile_ref: None,
-//             full_range: 24..46,
-//         });
-//
-//         let actual = super::get_completable_mdlink(&line.chars().collect(), 45);
-//
-//         assert_eq!(actual, expected);
-//     }
-//
-//     #[test]
-//     fn test_partial_mdlink_infile_refs() {
-//         let line = "This is line [display](partialpa#"; // (th)
-//
-//         let expected = Some(CompletableMDLink {
-//             partial: ("[display](partialpa#".to_string(), 13..33),
-//             display: ("display".to_string(), 14..21),
-//             path: ("partialpa".to_string(), 23..32),
-//             infile_ref: Some(("".to_string(), 33..33)),
-//             full_range: 13..33,
-//         });
-//
-//         let actual = super::get_completable_mdlink(&line.chars().collect(), 33);
-//
-//         assert_eq!(actual, expected);
-//
-//         let line = "[disp](pp) This is line [display](partialpath#Display)"; // (th)
-//
-//         let expected = Some(CompletableMDLink {
-//             partial: ("[display](partialpath#Display".to_string(), 24..53),
-//             display: ("display".to_string(), 25..32),
-//             path: ("partialpath".to_string(), 34..45),
-//             infile_ref: Some(("Display".to_string(), 46..53)),
-//             full_range: 24..54,
-//         });
-//
-//         let actual = super::get_completable_mdlink(&line.chars().collect(), 53);
-//
-//         assert_eq!(actual, expected);
-//
-//         let line = "[disp](pp) This is line [display](partialpath#Display)"; // (th)
-//
-//         let expected = Some(CompletableMDLink {
-//             partial: ("[display](partialpath#Disp".to_string(), 24..50),
-//             display: ("display".to_string(), 25..32),
-//             path: ("partialpath".to_string(), 34..45),
-//             infile_ref: Some(("Disp".to_string(), 46..50)),
-//             full_range: 24..54,
-//         });
-//
-//         let actual = super::get_completable_mdlink(&line.chars().collect(), 50);
-//
-//         assert_eq!(actual, expected);
-//     }
-//
-//     #[test]
-//     fn test_completable_tag_parsing() {
-//         //          0         1         2
-//         //          01234567890123456789012345678
-//         let text = "text over here #tag more text";
-//
-//         let insert_position = 19;
-//
-//         let expected = CompletableTag {
-//             full_range: 15..19,
-//             inputted_tag: ("tag".to_string(), 16..19) // not inclusive
-//         };
-//
-//         let actual = get_completable_tag(&text.chars().collect_vec(), insert_position);
-//
-//
-//         assert_eq!(Some(expected), actual);
-//
-//
-//
-//         //          0         1         2
-//         //          01234567890123456789012345678
-//         let text = "text over here #tag more text";
-//
-//         let insert_position = 20;
-//
-//         let actual = get_completable_tag(&text.chars().collect_vec(), insert_position);
-//
-//
-//         assert_eq!(None, actual);
-//
-//
-//         //          0         1         2
-//         //          01234567890123456789012345678
-//         let text = "text over here # more text";
-//
-//         let insert_position = 16;
-//
-//         let actual = get_completable_tag(&text.chars().collect_vec(), insert_position);
-//
-//         let expected = Some(CompletableTag {
-//             full_range: 15..16,
-//             inputted_tag: ("".to_string(), 16..16)
-//         });
-//
-//
-//         assert_eq!(expected, actual);
-//
-//
-//         //          0         1         2
-//         //          01234567890123456789012345678
-//         let text = "text over here #tag mor #tag ";
-//
-//         let insert_position = 28;
-//
-//         let expected = CompletableTag {
-//             full_range: 24..28,
-//             inputted_tag: ("tag".to_string(), 25..28) // not inclusive
-//         };
-//
-//         let actual = get_completable_tag(&text.chars().collect_vec(), insert_position);
-//
-//
-//         assert_eq!(Some(expected), actual);
-//
-//
-//     }
-// }
 
 fn run_completer<'a, T: Completer<'a>>(
     context: Context<'a>,

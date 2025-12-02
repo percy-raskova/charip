@@ -48,7 +48,8 @@ impl From<&str> for Refname {
     }
 }
 
-/// Utility function to get the Obsidian-style reference path from a file path.
-pub fn get_obsidian_ref_path(root_dir: &Path, path: &Path) -> Option<String> {
+/// Get a relative reference path from a file path (relative to root, without extension).
+/// Used for generating reference names for files, headings, and blocks.
+pub fn get_relative_ref_path(root_dir: &Path, path: &Path) -> Option<String> {
     diff_paths(path, root_dir).and_then(|diff| diff.with_extension("").to_str().map(String::from))
 }

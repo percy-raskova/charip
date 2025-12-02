@@ -15,7 +15,7 @@ pub fn rename(vault: &Vault, params: &RenameParams, path: &Path) -> Option<Works
     let (referenceable_document_change, new_ref_name): (Option<DocumentChangeOperation>, String) =
         match referenceable {
             Referenceable::Heading(path, heading) => {
-                let new_text = format!("{} {}", "#".repeat(heading.level.0), params.new_name); // move this obsidian syntax specific stuff to the vault
+                let new_text = format!("{} {}", "#".repeat(heading.level.0), params.new_name);
 
                 let change_op = DocumentChangeOperation::Edit(TextDocumentEdit {
                     text_document: tower_lsp::lsp_types::OptionalVersionedTextDocumentIdentifier {

@@ -27,11 +27,6 @@ fn date_to_file(date: NaiveDate, dailynote_format: &str, root_dir: &Path) -> Opt
     Url::from_file_path(path.with_extension("md")).ok()
 }
 
-fn extract_date_from_filename(filename: &str, dailynote_format: &str) -> Option<NaiveDate> {
-    let filename = filename.strip_suffix(".md").unwrap_or(filename);
-    NaiveDate::parse_from_str(filename, dailynote_format).ok()
-}
-
 fn parse_relative_directive(input: &str) -> Option<i64> {
     let trimmed = input.trim();
 
@@ -119,7 +114,12 @@ mod tests {
     use chrono::NaiveDate;
     use fuzzydate::parse;
 
-    use super::{datetime_to_file, extract_date_from_filename, parse_relative_directive};
+    use super::{datetime_to_file, parse_relative_directive};
+
+    fn extract_date_from_filename(filename: &str, dailynote_format: &str) -> Option<NaiveDate> {
+        let filename = filename.strip_suffix(".md").unwrap_or(filename);
+        NaiveDate::parse_from_str(filename, dailynote_format).ok()
+    }
 
     #[test]
     fn test_string_to_file() {

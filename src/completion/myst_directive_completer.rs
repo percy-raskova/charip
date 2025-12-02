@@ -101,9 +101,7 @@ impl<'a> Completer<'a> for MystDirectiveCompleter {
     type FilterParams = &'static str;
 
     fn completion_filter_text(&self, params: Self::FilterParams) -> String {
-        let fence: String = std::iter::repeat(self.fence_char)
-            .take(self.fence_count)
-            .collect();
+        let fence: String = std::iter::repeat_n(self.fence_char, self.fence_count).collect();
         format!("{}{{{}", fence, params)
     }
 }
@@ -239,7 +237,7 @@ impl MystDirective {
 
     /// Returns the snippet format for this directive.
     pub fn snippet(&self, fence_char: char, fence_count: usize) -> String {
-        let fence: String = std::iter::repeat(fence_char).take(fence_count).collect();
+        let fence: String = std::iter::repeat_n(fence_char, fence_count).collect();
 
         match self {
             // Directives with arguments

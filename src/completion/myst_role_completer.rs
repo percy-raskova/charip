@@ -17,7 +17,7 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionTextEdit, Position, Range, TextEdit,
 };
 
-use crate::vault::{get_obsidian_ref_path, Referenceable, Vault};
+use crate::vault::{get_relative_ref_path, Referenceable, Vault};
 
 use super::{Completable, Completer, Context};
 
@@ -43,16 +43,6 @@ impl RoleType {
             RoleType::Doc => "doc",
             RoleType::Download => "download",
         }
-    }
-
-    /// Returns true if this role type completes anchors and headings.
-    pub fn completes_anchors(&self) -> bool {
-        matches!(self, RoleType::Ref | RoleType::NumRef)
-    }
-
-    /// Returns true if this role type completes document paths.
-    pub fn completes_documents(&self) -> bool {
-        matches!(self, RoleType::Doc | RoleType::Download)
     }
 }
 
@@ -189,7 +179,7 @@ impl RoleCompletion {
         match (role_type, &referenceable) {
             // {ref} and {numref} complete anchors
             (RoleType::Ref | RoleType::NumRef, Referenceable::MystAnchor(path, symbol)) => {
-                let detail = get_obsidian_ref_path(vault.root_dir(), path);
+                let detail = get_relative_ref_path(vault.root_dir(), path);
                 Some(RoleCompletion {
                     label: symbol.name.clone(),
                     insert_text: symbol.name.clone(),
@@ -199,7 +189,7 @@ impl RoleCompletion {
             }
             // {ref} and {numref} also complete headings
             (RoleType::Ref | RoleType::NumRef, Referenceable::Heading(path, heading)) => {
-                let detail = get_obsidian_ref_path(vault.root_dir(), path);
+                let detail = get_relative_ref_path(vault.root_dir(), path);
                 // MyST uses heading text slugified as target
                 let slug = slugify_heading(&heading.heading_text);
                 Some(RoleCompletion {
@@ -211,7 +201,7 @@ impl RoleCompletion {
             }
             // {doc} completes file paths
             (RoleType::Doc | RoleType::Download, Referenceable::File(path, _mdfile)) => {
-                let ref_path = get_obsidian_ref_path(vault.root_dir(), path)?;
+                let ref_path = get_relative_ref_path(vault.root_dir(), path)?;
                 // Calculate relative path from current file
                 let relative_path = calculate_relative_path(current_path, path, vault.root_dir());
                 Some(RoleCompletion {
@@ -288,7 +278,7 @@ fn calculate_relative_path(
         }
     } else {
         // Fallback to absolute-like path from root
-        get_obsidian_ref_path(root_dir, target_path).unwrap_or_default()
+        get_relative_ref_path(root_dir, target_path).unwrap_or_default()
     }
 }
 
@@ -494,30 +484,6 @@ mod tests {
 
     mod role_type_tests {
         use super::*;
-
-        #[test]
-        fn test_ref_completes_anchors() {
-            assert!(RoleType::Ref.completes_anchors());
-            assert!(!RoleType::Ref.completes_documents());
-        }
-
-        #[test]
-        fn test_numref_completes_anchors() {
-            assert!(RoleType::NumRef.completes_anchors());
-            assert!(!RoleType::NumRef.completes_documents());
-        }
-
-        #[test]
-        fn test_doc_completes_documents() {
-            assert!(RoleType::Doc.completes_documents());
-            assert!(!RoleType::Doc.completes_anchors());
-        }
-
-        #[test]
-        fn test_download_completes_documents() {
-            assert!(RoleType::Download.completes_documents());
-            assert!(!RoleType::Download.completes_anchors());
-        }
 
         #[test]
         fn test_role_names() {

@@ -7,7 +7,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use helpers::{get_obsidian_ref_path, Refname};
+pub use helpers::{get_relative_ref_path, Refname};
 pub use types::{
     HeadingLevel, MDFootnote, MDHeading, MDIndexedBlock, MDLinkReferenceDefinition, MDTag, MyRange,
     Rangeable,
@@ -37,10 +37,10 @@ impl Vault {
         let md_file_paths = WalkDir::new(root_dir)
             .into_iter()
             .filter_entry(|e| {
+                // Skip hidden directories (starting with '.')
                 !e.file_name()
                     .to_str()
-                    .map(|s| s.starts_with('.') || s == "logseq") // TODO: This is a temporary fix; a hidden config is better
-                    .unwrap_or(false)
+                    .is_some_and(|s| s.starts_with('.'))
             })
             .flatten()
             .filter(|f| f.path().extension().and_then(|e| e.to_str()) == Some("md"))
@@ -151,15 +151,12 @@ fn find_range(referenceable: &Referenceable) -> Option<tower_lsp::lsp_types::Ran
                 character: 1,
             },
         }),
-        _ => match referenceable.get_range() {
-            None => None,
-            Some(a_my_range) => Some(*a_my_range),
-        },
+        _ => referenceable.get_range().map(|a_my_range| *a_my_range),
     }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-/// The in memory representation of the obsidian vault files. This data is exposed through an interface of methods to select the vaults data.
+/// The in-memory representation of the Markdown vault files. This data is exposed through an interface of methods to select the vault's data.
 /// These methods do not do any interpretation or analysis of the data. That is up to the consumer of this struct. The methods are analogous to selecting on a database.
 pub struct Vault {
     pub md_files: MyHashMap<MDFile>,
@@ -182,7 +179,7 @@ impl Vault {
             Some(path) => self
                 .md_files
                 .get(path)
-                .map(|md| extractor(md))
+                .map(&extractor)
                 .map(|vec| vec.iter().map(|item| (path, item)).collect())
                 .unwrap_or_default(),
             None => self
@@ -202,6 +199,7 @@ impl Vault {
     }
 
     /// Select all MyST symbols in a file if path is Some, else all in vault.
+    #[allow(dead_code)] // Public API for consumers; not used internally yet
     pub fn select_myst_symbols<'a>(
         &'a self,
         path: Option<&'a Path>,
@@ -210,6 +208,7 @@ impl Vault {
     }
 
     /// Select MyST directives (```{note}, ```{warning}, etc.) in a file or vault.
+    #[allow(dead_code)] // Public API for consumers; not used internally yet
     pub fn select_myst_directives<'a>(
         &'a self,
         path: Option<&'a Path>,
@@ -221,6 +220,7 @@ impl Vault {
     }
 
     /// Select MyST anchors ((target-name)=) in a file or vault.
+    #[allow(dead_code)] // Public API for consumers; not used internally yet
     pub fn select_myst_anchors<'a>(
         &'a self,
         path: Option<&'a Path>,
@@ -718,6 +718,7 @@ pub enum MystRoleKind {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Reference {
+    #[allow(dead_code)] // Tag support; matched but not currently constructed
     Tag(ReferenceData),
     MDFileLink(ReferenceData),
     MDHeadingLink(ReferenceData, File, Specialref),
@@ -1039,12 +1040,12 @@ impl MDLinkReferenceDefinition {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 /**
-An Algebreic type for methods for all referenceables, which are anything able to be referenced through obsidian link or tag. These include
-Files, headings, indexed blocks, tags, ...
+An algebraic type for methods on all referenceables, which are anything able to be referenced through a Markdown link or tag.
+These include files, headings, indexed blocks, tags, MyST anchors, etc.
 
-I chose to use an enum instead of a trait as (1) I dislike the ergonomics with dynamic dyspatch, (2) It is sometimes necessary to differentiate between members of this abstraction, (3) it was convienient for this abstraction to hold the path of the referenceable for use in matching link names etc...
+I chose to use an enum instead of a trait as (1) I dislike the ergonomics with dynamic dispatch, (2) it is sometimes necessary to differentiate between members of this abstraction, (3) it was convenient for this abstraction to hold the path of the referenceable for use in matching link names etc...
 
-The vault struct is focused on presenting data from the obsidian vault through a good usable interface. The vault module as whole, however, is in change in interfacting with the obsidian syntax, which is where the methods on this enum are applicable. Obsidian has a specific linking style, and the methods on this enum provide a way to work with this syntax in a way that decouples the interpretation from other modules. The most common one method is the `is_reference` which tells if a piece of text is a refence to a particular referenceable (which is implemented differently for each type of referenceable). As a whole, this provides an abstraction around interpreting obsidian syntax; when obsidian updates syntax, code here changes and not in other places; when new referenceables are added and code is needed to interpret/match its links, code here changes and not elsewhere.
+The vault struct is focused on presenting data from the vault through a good usable interface. The vault module as a whole, however, is in charge of interfacing with the Markdown/MyST syntax, which is where the methods on this enum are applicable. Markdown has specific linking styles, and the methods on this enum provide a way to work with this syntax in a way that decouples the interpretation from other modules. The most common method is `is_reference` which tells if a piece of text is a reference to a particular referenceable (which is implemented differently for each type of referenceable). As a whole, this provides an abstraction around interpreting Markdown/MyST syntax.
 */
 pub enum Referenceable<'a> {
     File(&'a PathBuf, &'a MDFile),
@@ -1066,14 +1067,14 @@ impl Referenceable<'_> {
     pub fn get_refname(&self, root_dir: &Path) -> Option<Refname> {
         match self {
             Referenceable::File(path, _) => {
-                get_obsidian_ref_path(root_dir, path).map(|string| Refname {
+                get_relative_ref_path(root_dir, path).map(|string| Refname {
                     full_refname: string.to_owned(),
                     path: string.to_owned().into(),
                     ..Default::default()
                 })
             }
 
-            Referenceable::Heading(path, heading) => get_obsidian_ref_path(root_dir, path)
+            Referenceable::Heading(path, heading) => get_relative_ref_path(root_dir, path)
                 .map(|refpath| {
                     (
                         refpath.clone(),
@@ -1086,7 +1087,7 @@ impl Referenceable<'_> {
                     infile_ref: <std::string::String as Clone>::clone(&heading.heading_text).into(),
                 }),
 
-            Referenceable::IndexedBlock(path, index) => get_obsidian_ref_path(root_dir, path)
+            Referenceable::IndexedBlock(path, index) => get_relative_ref_path(root_dir, path)
                 .map(|refpath| (refpath.clone(), format!("{}#^{}", refpath, index.index)))
                 .map(|(path, full_refname)| Refname {
                     full_refname,

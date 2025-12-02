@@ -9,7 +9,8 @@ use crate::vault::MyRange;
 pub enum MystSymbolKind {
     Directive,
     Anchor,
-    Reference, // Placeholder for future MyST cross-refs like {ref}`target`
+    #[allow(dead_code)] // Placeholder for future MyST cross-refs like {ref}`target`
+    Reference,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]

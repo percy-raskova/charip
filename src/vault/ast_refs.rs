@@ -5,12 +5,9 @@
 //!
 //! # Architecture
 //!
-//! The extraction works in two layers:
-//! 1. **Native CommonMark nodes**: `Link`, `FootnoteReference`, `LinkReference`
-//!    are directly parsed by markdown-rs and extracted from the AST.
-//! 2. **Wikilinks**: `[[...]]` syntax is NOT CommonMark, so it appears as
-//!    `Text` nodes. We apply a scoped regex to text nodes only, with proper
-//!    byte offset adjustment.
+//! The extraction works by parsing CommonMark nodes: `Link`, `FootnoteReference`,
+//! `LinkReference` are directly parsed by markdown-rs and extracted from the AST.
+//! MyST roles are extracted via regex on text nodes.
 
 use markdown::{mdast::Node, to_mdast, ParseOptions};
 use once_cell::sync::Lazy;
@@ -67,7 +64,7 @@ fn has_link_definitions(node: &Node) -> bool {
 fn traverse_node(
     node: &Node,
     text: &str,
-    file_name: &str, // Kept for API compatibility, passed through recursion
+    _file_name: &str, // Kept for API compatibility, passed through recursion
     rope: &Rope,
     has_definitions: bool,
     refs: &mut Vec<Reference>,
@@ -109,7 +106,7 @@ fn traverse_node(
     // Recurse into children
     if let Some(children) = node.children() {
         for child in children {
-            traverse_node(child, text, file_name, rope, has_definitions, refs);
+            traverse_node(child, text, _file_name, rope, has_definitions, refs);
         }
     }
 }

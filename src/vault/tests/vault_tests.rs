@@ -798,7 +798,7 @@ Plain tag: #plaintext
 }
 
 #[test]
-fn test_obsidian_footnote() {
+fn test_footnote() {
     let text = "[^1]: This is a footnote";
     let parsed = MDFootnote::new(text).collect_vec();
     let expected = vec![MDFootnote {

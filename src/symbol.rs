@@ -19,13 +19,12 @@ fn compute_match_score(
 ) -> (u32, SymbolInformation) {
     let mut buf = Vec::new();
     (
-        match pattern.score(
-            nucleo_matcher::Utf32Str::new(symbol.name.as_str(), &mut buf),
-            matcher,
-        ) {
-            None => 0,
-            Some(score) => score,
-        },
+        pattern
+            .score(
+                nucleo_matcher::Utf32Str::new(symbol.name.as_str(), &mut buf),
+                matcher,
+            )
+            .unwrap_or_default(),
         symbol,
     )
 }

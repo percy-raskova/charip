@@ -1,12 +1,6 @@
-use std::{
-    collections::HashSet,
-    iter::once,
-    path::{Path, PathBuf},
-    time::SystemTime,
-};
+use std::{collections::HashSet, iter::once, path::Path};
 
 use chrono::{Duration, NaiveDate};
-use itertools::Itertools;
 use once_cell::sync::Lazy;
 use rayon::prelude::*;
 use regex::Regex;
@@ -23,7 +17,7 @@ use crate::{
 };
 
 use super::{
-    matcher::{fuzzy_match_completions, Matchable, OrderedCompletion},
+    matcher::{fuzzy_match_completions, Matchable},
     Completable, Completer, Context,
 };
 
@@ -217,12 +211,7 @@ impl<'a> Completer<'a> for MarkdownLinkCompleter<'a> {
             return None;
         }
 
-        let Context {
-            vault,
-            opened_files: _,
-            path,
-            ..
-        } = context;
+        let Context { vault, path, .. } = context;
 
         let line_chars = vault.select_line(path, line as isize)?;
         let line_to_cursor = line_chars.get(0..character)?;
@@ -244,11 +233,10 @@ impl<'a> Completer<'a> for MarkdownLinkCompleter<'a> {
 
         let line_string = String::from_iter(&line_chars);
 
-        let file_name = context
-            .path
-            .file_stem()
-            .expect("File name is not valid")
-            .to_string_lossy();
+        let file_name = match context.path.file_stem() {
+            Some(stem) => stem.to_string_lossy(),
+            None => return None, // Invalid path, can't complete
+        };
         let reference_under_cursor = Reference::new(&line_string, &file_name).find(|reference| {
             reference.range.start.character <= character as u32
                 && reference.range.end.character >= character as u32
@@ -352,202 +340,6 @@ impl PartialInfileRef {
             PartialInfileRef::HeadingRef(s) => s.to_string(),
             PartialInfileRef::BlockRef(s) => format!("^{}", s),
         }
-    }
-}
-
-pub struct WikiLinkCompleter<'a> {
-    vault: &'a Vault,
-    cmp_text: Vec<char>,
-    files: &'a [PathBuf],
-    index: u32,
-    character: u32,
-    line: u32,
-    context_path: &'a Path,
-    settings: &'a Settings,
-    chars_in_line: u32,
-}
-
-impl<'a> LinkCompleter<'a> for WikiLinkCompleter<'a> {
-    fn settings(&self) -> &'a Settings {
-        self.settings
-    }
-
-    fn path(&self) -> &'a Path {
-        self.context_path
-    }
-
-    fn position(&self) -> Position {
-        Position {
-            line: self.line,
-            character: self.character,
-        }
-    }
-
-    fn vault(&self) -> &'a Vault {
-        self.vault
-    }
-
-    fn entered_refname(&self) -> String {
-        String::from_iter(&self.cmp_text)
-    }
-
-    fn completion_text_edit(&self, display: Option<&str>, refname: &str) -> CompletionTextEdit {
-        // Wikilinks never include .md extension - this completer is deprecated
-        // and will be removed when wikilink support is fully dropped
-        let formatted_refname = refname.to_string();
-
-        CompletionTextEdit::Edit(TextEdit {
-            range: Range {
-                start: Position {
-                    line: self.line,
-                    character: self.index + 1_u32, // index is right at the '[' in [[link]]; we want one more than that
-                },
-                end: Position {
-                    line: self.line,
-                    character: (self.chars_in_line - 1).min(self.character + 2_u32), // TODO: in zed, you cannot zed end to be out of the line count index
-                },
-            },
-
-            new_text: format!(
-                "{}{}]]${{2:}}",
-                formatted_refname,
-                display
-                    .map(|display| format!("|{}", display))
-                    .unwrap_or("".to_string())
-            ),
-        })
-    }
-}
-
-impl<'a> Completer<'a> for WikiLinkCompleter<'a> {
-    fn construct(context: Context<'a>, line: usize, character: usize) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        if !context.settings.references_in_codeblocks
-            && check_in_code_block(&context, line, character)
-        {
-            return None;
-        }
-
-        let Context {
-            vault,
-            opened_files,
-            path,
-            ..
-        } = context;
-
-        let line_chars = vault.select_line(path, line as isize)?;
-
-        let index = line_chars
-            .get(0..=(character.min(line_chars.len() - 1)))? // select only the characters up to the cursor
-            .iter()
-            .enumerate() // attach indexes
-            .tuple_windows() // window into pairs of characters
-            .collect::<Vec<(_, _)>>()
-            .into_iter()
-            .rev() // search from the cursor back
-            .find(|((_, &c1), (_, &c2))| c1 == '[' && c2 == '[')
-            .map(|(_, (i, _))| i); // only take the index; using map because find returns an option
-
-        let index = index.and_then(|index| {
-            if line_chars.get(index..character)?.iter().contains(&']') {
-                None
-            } else {
-                Some(index)
-            }
-        });
-
-        index.and_then(|index| {
-            let cmp_text = line_chars.get(index + 1..character)?;
-
-            Some(WikiLinkCompleter {
-                vault,
-                cmp_text: cmp_text.to_vec(),
-                files: opened_files,
-                index: index as u32,
-                character: character as u32,
-                line: line as u32,
-                context_path: context.path,
-                settings: context.settings,
-                chars_in_line: line_chars.len() as u32,
-            })
-        })
-    }
-
-    fn completions(&self) -> Vec<impl Completable<'a, Self>>
-    where
-        Self: Sized,
-    {
-        let WikiLinkCompleter { vault, .. } = self;
-
-        match *self.cmp_text {
-            // Give recent referenceables; TODO: improve this;
-            [] => self
-                .files
-                .iter()
-                .map(
-                    |path| match std::fs::metadata(path).and_then(|meta| meta.modified()) {
-                        Ok(modified) => (path, modified),
-                        Err(_) => (path, SystemTime::UNIX_EPOCH),
-                    },
-                )
-                .sorted_by_key(|(_, modified)| *modified)
-                .flat_map(|(path, modified)| {
-                    let referenceables = vault
-                        .select_referenceable_nodes(Some(path))
-                        .into_iter()
-                        .filter(|referenceable| {
-                            self.settings().heading_completions
-                                || !matches!(
-                                    referenceable,
-                                    Referenceable::Heading(..)
-                                        | Referenceable::UnresolvedHeading(..)
-                                )
-                        })
-                        .collect::<Vec<_>>();
-
-                    let modified_string = modified
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .ok()?
-                        .as_secs()
-                        .to_string();
-
-                    Some(
-                        referenceables
-                            .into_iter()
-                            .flat_map(move |referenceable| LinkCompletion::new(referenceable, self))
-                            .flatten()
-                            .flat_map(move |completion| {
-                                Some(OrderedCompletion::<WikiLinkCompleter, LinkCompletion>::new(
-                                    completion,
-                                    modified_string.clone(),
-                                ))
-                            }),
-                    )
-                })
-                .flatten()
-                .collect_vec(),
-            ref filter_text @ [..] if !filter_text.contains(&']') => {
-                let filter_text = &self.cmp_text;
-
-                let link_completions = self.link_completions();
-
-                let matches = fuzzy_match_completions(
-                    &String::from_iter(filter_text),
-                    link_completions,
-                    &self.settings.case_matching,
-                );
-
-                matches
-            }
-            _ => vec![],
-        }
-    }
-
-    type FilterParams = &'a str;
-    fn completion_filter_text(&self, params: Self::FilterParams) -> String {
-        params.to_string()
     }
 }
 
@@ -797,31 +589,6 @@ impl<'a> Completable<'a, MarkdownLinkCompleter<'a>> for LinkCompletion<'a> {
         Some(CompletionItem {
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             ..self.default_completion(text_edit, &filter_text, markdown_link_completer)
-        })
-    }
-}
-
-impl<'a> Completable<'a, WikiLinkCompleter<'a>> for LinkCompletion<'a> {
-    fn completions(&self, completer: &WikiLinkCompleter<'a>) -> Option<CompletionItem> {
-        let refname = self.refname();
-        let match_text = self.match_string();
-
-        let wikilink_display_text = match self {
-            File { .. } => None,
-            Alias { match_string, .. } => Some(format!("${{1:{}}}", match_string)),
-            Heading { .. } => None,
-            Block { .. } => None,
-            Unresolved { .. } => None,
-            DailyNote(_) => None,
-        };
-
-        let text_edit = completer.completion_text_edit(wikilink_display_text.as_deref(), &refname);
-
-        let filter_text = completer.completion_filter_text(match_text);
-
-        Some(CompletionItem {
-            insert_text_format: Some(InsertTextFormat::SNIPPET),
-            ..self.default_completion(text_edit, &filter_text, completer)
         })
     }
 }

@@ -21,7 +21,7 @@ The original markdown-oxide was designed for Obsidian/Logseq PKM workflows with 
 
 ```bash
 # Build
-cargo build --release          # Release build (binary at target/release/markdown-oxide)
+cargo build --release          # Release build (binary at target/release/charip)
 cargo build                    # Debug build
 
 # Test
@@ -42,7 +42,7 @@ cargo run --release -- daily   # Open/create today's daily note
 cargo run --release -- config  # Open config file
 ```
 
-**CI Requirements**: Uses **nightly** Rust toolchain. Ensure you have `rustup toolchain install nightly` and formatting passes before pushing.
+**CI Requirements**: Uses **nightly** Rust toolchain with `--locked` flag. Ensure `rustup toolchain install nightly` is installed and formatting passes before pushing. CI runs: `cargo build --verbose --locked && cargo test --verbose`
 
 ## Architecture
 
@@ -79,12 +79,14 @@ cargo run --release -- config  # Open config file
 
 | Module | Purpose |
 |--------|---------|
-| `src/completion/` | Autocomplete (links, tags, callouts, footnotes) |
-| `src/gotodef.rs` | Go-to-definition for wikilinks/headers |
+| `src/completion/` | Autocomplete (links, tags, callouts, footnotes, MyST) |
+| `src/completion/myst_directive_completer.rs` | MyST directive autocomplete (` ```{ `) |
+| `src/completion/myst_role_completer.rs` | MyST role target autocomplete (`{ref}`) |
+| `src/gotodef.rs` | Go-to-definition for links/headers/MyST anchors |
 | `src/references.rs` | Find all references (backlinks) |
 | `src/rename.rs` | Rename symbols across vault |
 | `src/diagnostics.rs` | Broken link detection |
-| `src/myst_parser.rs` | MyST directive parsing (Phase 1 complete) |
+| `src/myst_parser.rs` | MyST directive/role/anchor extraction |
 | `src/config.rs` | Settings loading including Obsidian import |
 | `src/daily.rs` | Daily notes functionality |
 
@@ -104,19 +106,22 @@ AST-based parsing via `markdown-rs` is now the primary path for reference extrac
 
 Future work: `petgraph` for toctree/include graph relationships.
 
-## Active Development: MyST Support
+## MyST Support Status
 
-The project is implementing MyST support in phases:
+MyST support has been implemented across four phases:
 
-1. **Phase 1 (Complete)**: AST-based reference extraction (`ast_refs.rs`), MyST directive/anchor extraction (`myst_parser.rs`), wikilink removal
-2. **Phase 2 (In Progress)**: Role extraction infrastructure (`{doc}`, `{ref}`, `{term}` roles)
-3. **Phase 3 (Planned)**: LSP capabilities (completion, diagnostics for MyST roles)
+1. **Phase 1 (Complete)**: MyST role extraction (`{ref}`, `{doc}`, `{term}`, etc.)
+2. **Phase 2 (Complete)**: Anchor resolution (go-to-definition from roles to `(target)=` anchors)
+3. **Phase 2.5 (Complete)**: Directive labels (`:name:` option parsing)
+4. **Phase 3 (Complete)**: Directive autocomplete (` ```{ ` triggers directive completion)
+5. **Phase 4 (Complete)**: Role target autocomplete (`{ref}`` ` triggers anchor/heading completion)
 
 Key files for MyST work:
+- `src/myst_parser.rs` - MyST directive/role/anchor extraction
+- `src/completion/myst_directive_completer.rs` - Directive completions
+- `src/completion/myst_role_completer.rs` - Role target completions
 - `src/vault/ast_refs.rs` - AST-based reference extraction
-- `src/myst_parser.rs` - MyST directive/anchor parsing
 - `ai-docs/myst-lsp-roadmap.md` - Feature roadmap based on rstnotes analysis
-- `ai-docs/Target_Environment_Analysis.md` - rstnotes-specific requirements
 
 ## VS Code Extension
 
