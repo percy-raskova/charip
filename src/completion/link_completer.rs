@@ -69,7 +69,7 @@ pub trait LinkCompleter<'a>: Completer<'a> {
         let single_unresolved_under_cursor = unresolved_under_cursor.and_then(|referenceable| {
             let ref_count = self
                 .vault()
-                .select_references_for_referenceable(&referenceable)?
+                .select_references_for_referenceable(&referenceable)
                 .len();
 
             if ref_count == 1 {

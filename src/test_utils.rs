@@ -65,7 +65,6 @@ pub fn create_test_vault_dir() -> (TempDir, PathBuf) {
 ///     std::fs::write(dir.join("test.md"), "# Test").unwrap();
 /// });
 /// ```
-#[allow(dead_code)] // This helper is available for future tests
 pub fn create_test_vault<F>(setup_fn: F) -> (TempDir, PathBuf, Vault)
 where
     F: FnOnce(&PathBuf),

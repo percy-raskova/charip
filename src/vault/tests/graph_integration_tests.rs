@@ -354,9 +354,7 @@ fn test_graph_based_backlinks_single_source() {
     let referenceable = Referenceable::File(&target_path, target_node);
 
     // Find backlinks via graph-optimized method
-    let backlinks = vault
-        .select_references_for_referenceable(&referenceable)
-        .expect("Should return backlinks");
+    let backlinks = vault.select_references_for_referenceable(&referenceable);
 
     assert_eq!(backlinks.len(), 1, "Should find exactly one backlink");
     assert_eq!(
@@ -384,9 +382,7 @@ fn test_graph_based_backlinks_multiple_sources() {
     let referenceable = Referenceable::File(&target_path, target_node);
 
     // Find backlinks via graph-optimized method
-    let backlinks = vault
-        .select_references_for_referenceable(&referenceable)
-        .expect("Should return backlinks");
+    let backlinks = vault.select_references_for_referenceable(&referenceable);
 
     assert_eq!(backlinks.len(), 2, "Should find exactly two backlinks");
 
@@ -427,9 +423,7 @@ fn test_graph_based_backlinks_to_heading() {
     let referenceable = Referenceable::Heading(&target_path, heading);
 
     // Find backlinks via graph-optimized method
-    let backlinks = vault
-        .select_references_for_referenceable(&referenceable)
-        .expect("Should return backlinks");
+    let backlinks = vault.select_references_for_referenceable(&referenceable);
 
     assert_eq!(
         backlinks.len(),
@@ -463,9 +457,7 @@ fn test_graph_backlinks_no_results_for_unlinked_file() {
     let referenceable = Referenceable::File(&orphan_path, orphan_node);
 
     // Find backlinks
-    let backlinks = vault
-        .select_references_for_referenceable(&referenceable)
-        .expect("Should return empty backlinks");
+    let backlinks = vault.select_references_for_referenceable(&referenceable);
 
     assert!(
         backlinks.is_empty(),

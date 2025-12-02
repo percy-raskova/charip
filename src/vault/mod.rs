@@ -372,7 +372,10 @@ impl Vault {
     }
 
     /// Select all MyST symbols in a file if path is Some, else all in vault.
-    #[allow(dead_code)] // Public API for consumers; not used internally yet
+    ///
+    /// This is a foundational method used by the convenience methods
+    /// `select_myst_directives()` and `select_myst_anchors()`.
+    #[allow(dead_code)] // Public API for LSP consumers and tests
     pub fn select_myst_symbols<'a>(
         &'a self,
         path: Option<&'a Path>,
@@ -380,8 +383,10 @@ impl Vault {
         self.select_field(path, |md| &md.myst_symbols)
     }
 
-    /// Select MyST directives (```{note}, ```{warning}, etc.) in a file or vault.
-    #[allow(dead_code)] // Public API for consumers; not used internally yet
+    /// Select MyST directives (` ```{note} `, ` ```{warning} `, etc.) in a file or vault.
+    ///
+    /// Convenience method that filters `select_myst_symbols()` by `MystSymbolKind::Directive`.
+    #[allow(dead_code)] // Public API for LSP consumers and tests
     pub fn select_myst_directives<'a>(
         &'a self,
         path: Option<&'a Path>,
@@ -392,8 +397,10 @@ impl Vault {
             .collect()
     }
 
-    /// Select MyST anchors ((target-name)=) in a file or vault.
-    #[allow(dead_code)] // Public API for consumers; not used internally yet
+    /// Select MyST anchors (`(target-name)=`) in a file or vault.
+    ///
+    /// Convenience method that filters `select_myst_symbols()` by `MystSymbolKind::Anchor`.
+    #[allow(dead_code)] // Public API for LSP consumers and tests
     pub fn select_myst_anchors<'a>(
         &'a self,
         path: Option<&'a Path>,
@@ -564,14 +571,16 @@ impl Vault {
     /// Uses graph-based resolution for file-based referenceables (O(K) where
     /// K = incoming edges to target file), with fallback to linear scan
     /// for reference types not well-suited for graph traversal (tags).
+    ///
+    /// Returns an empty `Vec` if no references are found.
     pub fn select_references_for_referenceable(
         &self,
         referenceable: &Referenceable,
-    ) -> Option<Vec<(&Path, &Reference)>> {
+    ) -> Vec<(&Path, &Reference)> {
         // Try graph-based backlink resolution first
         if let Some(results) = self.backlinks_via_graph(referenceable) {
             // Graph found results or confirmed no backlinks exist
-            return Some(results);
+            return results;
         }
 
         // Fallback to linear scan for tags and other complex cases
@@ -675,28 +684,26 @@ impl Vault {
     fn backlinks_linear_scan<'a>(
         &'a self,
         referenceable: &Referenceable,
-    ) -> Option<Vec<(&'a Path, &'a Reference)>> {
+    ) -> Vec<(&'a Path, &'a Reference)> {
         let references = self.select_references(None);
 
-        Some(
-            references
-                .into_par_iter()
-                .filter(|(ref_path, reference)| {
-                    referenceable.matches_reference(&self.root_dir, reference, ref_path)
-                })
-                .map(|(path, reference)| {
-                    match std::fs::metadata(path).and_then(|meta| meta.modified()) {
-                        Ok(modified) => (path, reference, modified),
-                        Err(_) => (path, reference, SystemTime::UNIX_EPOCH),
-                    }
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .sorted_by_key(|(_, _, modified)| *modified)
-                .rev()
-                .map(|(one, two, _)| (one, two))
-                .collect(),
-        )
+        references
+            .into_par_iter()
+            .filter(|(ref_path, reference)| {
+                referenceable.matches_reference(&self.root_dir, reference, ref_path)
+            })
+            .map(|(path, reference)| {
+                match std::fs::metadata(path).and_then(|meta| meta.modified()) {
+                    Ok(modified) => (path, reference, modified),
+                    Err(_) => (path, reference, SystemTime::UNIX_EPOCH),
+                }
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .sorted_by_key(|(_, _, modified)| *modified)
+            .rev()
+            .map(|(one, two, _)| (one, two))
+            .collect()
     }
 
     /// Resolves a reference to its target referenceables.

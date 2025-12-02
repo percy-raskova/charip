@@ -18,13 +18,13 @@ pub fn code_lens(vault: &Vault, path: &Path, _params: &CodeLensParams) -> Option
     let referenceables = vault.select_referenceable_nodes(Some(path));
     let data = referenceables
         .into_iter()
-        .filter_map(|referenceable| {
+        .map(|referenceable| {
             let references = vault
-                .select_references_for_referenceable(&referenceable)?
+                .select_references_for_referenceable(&referenceable)
                 .into_iter()
                 .collect_vec();
 
-            Some((referenceable, references))
+            (referenceable, references)
         })
         .collect_vec();
 

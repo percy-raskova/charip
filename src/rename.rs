@@ -49,7 +49,7 @@ pub fn rename(vault: &Vault, params: &RenameParams, path: &Path) -> Option<Works
     let (referenceable_document_change, new_ref_name) =
         referenceable.get_definition_rename_edit(&params.new_name)?;
 
-    let references = vault.select_references_for_referenceable(&referenceable)?;
+    let references = vault.select_references_for_referenceable(&referenceable);
 
     let references_changes = references
         .into_iter()

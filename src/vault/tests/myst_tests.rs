@@ -1,12 +1,11 @@
 use crate::config::Settings;
 use crate::myst_parser::MystSymbolKind;
-use crate::test_utils::create_test_vault_dir;
+use crate::test_utils::{create_test_vault, create_test_vault_dir};
 use crate::vault::*;
 use std::fs;
 
 #[test]
 fn test_vault_extracts_myst_directives() {
-    let (_temp_dir, vault_dir) = create_test_vault_dir();
     let content = r#"
 # My Document
 
@@ -18,11 +17,9 @@ This is a note.
 Be careful!
 ```
 "#;
-    let test_file = vault_dir.join("test.md");
-    fs::write(&test_file, content).unwrap();
-
-    let settings = Settings::default();
-    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+    let (_temp_dir, _vault_dir, vault) = create_test_vault(|dir| {
+        fs::write(dir.join("test.md"), content).unwrap();
+    });
 
     // Use the convenience method instead of manual filtering
     let directives = vault.select_myst_directives(None);
@@ -236,9 +233,6 @@ fn test_myst_ref_role_resolves_to_anchor() {
     // Find references to this anchor
     let refs = vault.select_references_for_referenceable(anchor);
 
-    assert!(refs.is_some(), "Should find references to anchor");
-    let refs = refs.unwrap();
-
     assert_eq!(refs.len(), 1, "Should find 1 reference to the anchor");
 
     // Verify it's a MystRole reference
@@ -250,7 +244,7 @@ fn test_myst_ref_role_resolves_to_anchor() {
 
     match reference {
         Reference::MystRole(data, kind, target) => {
-            assert_eq!(*kind, MystRoleKind::Ref);
+            assert_eq!(kind, &MystRoleKind::Ref);
             assert_eq!(target, "my-section");
             assert_eq!(data.reference_text, "my-section");
         }
@@ -498,9 +492,6 @@ Hello {{name}}!
     // Find references to this substitution
     let refs = vault.select_references_for_referenceable(sub_def);
 
-    assert!(refs.is_some(), "Should find references to substitution");
-    let refs = refs.unwrap();
-
     assert_eq!(refs.len(), 1, "Should find 1 reference to the substitution");
 
     // Verify it's a Substitution reference
@@ -554,7 +545,6 @@ Using {{shared_var}} which is undefined in this file.
 
     // Find references to this substitution
     let refs = vault.select_references_for_referenceable(sub_def);
-    let refs = refs.unwrap_or_default();
 
     // Should NOT find any references because the usage in file_b
     // should not resolve to the definition in file_a (file-local only)

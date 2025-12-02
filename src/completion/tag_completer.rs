@@ -156,8 +156,7 @@ impl<'a> Completable<'a, TagCompleter<'a>> for TagCompletable<'a> {
         let num_references = completer
             .vault
             .select_references_for_referenceable(&self_as_referenceable)
-            .map(|references| references.len())
-            .unwrap_or(0);
+            .len();
 
         Some(CompletionItem {
             label: self.tag.1.tag_ref.clone(),

@@ -15,18 +15,13 @@ pub fn references(vault: &Vault, cursor_position: Position, path: &Path) -> Opti
         }
         (_, Some(reference)) => {
             let referenceables = vault.select_referenceables_for_reference(reference, path);
-            let references = referenceables
+            referenceables
                 .into_iter()
-                .filter_map(|referenceable| {
-                    vault.select_references_for_referenceable(&referenceable)
-                }) // drop the Nones on the options
-                .flatten()
-                .collect_vec();
-
-            Some(references)
+                .flat_map(|referenceable| vault.select_references_for_referenceable(&referenceable))
+                .collect_vec()
         }
-        (None, None) => None,
-    }?;
+        (None, None) => return None,
+    };
 
     Some(
         references

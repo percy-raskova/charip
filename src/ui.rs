@@ -25,7 +25,6 @@ fn referenceable_string(vault: &Vault, referenceables: &[Referenceable]) -> Opti
     let backlinks_preview = match referenceables
         .iter()
         .flat_map(|i| vault.select_references_for_referenceable(i))
-        .flatten()
         .collect_vec()
     {
         references if !references.is_empty() => references
