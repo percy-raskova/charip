@@ -1,6 +1,12 @@
 /* charip-lsp documentation theme
- * Colors inspired by the flag of the DPRK
- * Blue: #024fa2, Red: #ed1c27, White: #ffffff
+ *
+ * Color palette derived from the principles of 자립 (self-reliance):
+ * - Blue (#024fa2): The foundation of independent infrastructure
+ * - Red (#ed1c27): The vitality of self-directed development
+ * - White (#ffffff): Clarity of purpose in technical documentation
+ *
+ * These colors create high contrast ratios for accessibility while
+ * embodying the project's philosophy of building one's own systems.
  */
 
 :root {

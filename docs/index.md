@@ -10,16 +10,22 @@ A Language Server for MyST (Markedly Structured Text) documents.
 
 **Charip** (자립, *ja-rip*) means "self-reliance" or "economic self-sufficiency" in Korean. It is one of the three pillars of the Juche idea, which holds that true independence requires building one's own infrastructure rather than depending on external systems.
 
-This project embodies that principle: rather than adapting to tools built for other purposes, we build tools that serve our specific needs. Revolutionary movements need revolutionary infrastructure—this LSP is one component of that effort.
+This project embodies that principle: rather than adapting PKM tools built for Obsidian workflows, MyST documentation writers build their own infrastructure. Technical documentation deserves tooling that understands its specific needs—cross-references, glossaries, directives—without the ideological assumptions of note-taking systems designed for different purposes.
 
 ## Project Status
 
-```{admonition} Current Phase
+```{admonition} Current Status
 :class: tip
 
-**Phase 1 Complete**: MyST directive and anchor parsing integrated into the vault.
+All core MyST features implemented:
+- Directive/role/anchor extraction
+- Go-to-definition and find references
+- Directive and role target autocomplete
+- Anchor rename from roles
+- Glossary term completion
+- Broken reference diagnostics
 
-**Phase 2 Next**: Graph architecture using `petgraph` for cross-file reference resolution.
+**194 tests passing**
 ```
 
 ## Documentation
