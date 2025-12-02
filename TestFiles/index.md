@@ -9,6 +9,7 @@ This vault tests all LSP features for MyST Markdown.
 - {doc}`reference/api`
 - {doc}`reference/equations`
 - {doc}`glossary`
+- {doc}`syntax-showcase`
 
 ## Anchor References
 
@@ -16,6 +17,7 @@ This vault tests all LSP features for MyST Markdown.
 - {ref}`config-anchor`
 - {ref}`api-docs`
 - {numref}`figure-example`
+- {numref}`syntax-figure`
 
 ## Glossary Terms
 
