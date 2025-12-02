@@ -25,6 +25,9 @@ pub struct Settings {
     pub block_transclusion: bool,
     pub block_transclusion_length: EmbeddedBlockTransclusionLength,
     pub link_filenames_only: bool,
+    /// Path to JSON schema for frontmatter validation, relative to vault root.
+    /// If empty or the file doesn't exist, frontmatter validation is disabled.
+    pub frontmatter_schema_path: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -79,6 +82,10 @@ impl Settings {
                 }),
             )?
             .set_default("link_filenames_only", false)?
+            .set_default(
+                "frontmatter_schema_path",
+                "_schemas/frontmatter.schema.json",
+            )?
             .build()
             .map_err(|err| anyhow!("Build err: {err}"))?;
 
@@ -107,6 +114,7 @@ impl Default for Settings {
             block_transclusion: true,
             block_transclusion_length: EmbeddedBlockTransclusionLength::Full,
             link_filenames_only: false,
+            frontmatter_schema_path: "_schemas/frontmatter.schema.json".to_string(),
         }
     }
 }

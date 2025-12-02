@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use completion::get_completions;
 use config::{EmbeddedBlockTransclusionLength, Settings};
-use diagnostics::diagnostics;
+use diagnostics::diagnostics_with_schema;
+use frontmatter_schema::FrontmatterSchema;
 use itertools::Itertools;
 use rayon::prelude::*;
 use references::references;
@@ -28,6 +29,7 @@ mod completion;
 mod config;
 mod daily;
 mod diagnostics;
+mod frontmatter_schema;
 mod gotodef;
 mod hover;
 mod macros;
@@ -184,12 +186,20 @@ impl Backend {
 
         let diagnostics = self
             .bind_vault(|vault| {
+                // Load frontmatter schema if configured
+                let schema = if !settings.frontmatter_schema_path.is_empty() {
+                    let schema_path = vault.root_dir().join(&settings.frontmatter_schema_path);
+                    FrontmatterSchema::load(&schema_path)
+                } else {
+                    None
+                };
+
                 Ok(uris
                     .par_iter()
                     .filter_map(|uri| {
                         let path = uri.to_file_path().ok()?;
 
-                        diagnostics(vault, &settings, (&path, uri))
+                        diagnostics_with_schema(vault, &settings, (&path, uri), schema.as_ref())
                             .map(|diags| (uri.clone(), diags))
                     })
                     .collect::<Vec<_>>())

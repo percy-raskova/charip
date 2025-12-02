@@ -177,12 +177,9 @@ impl Vault {
         // Re-add edges for resolved references
         if let Some(&source_idx) = old.node_index.get(&source_path) {
             for reference in &new_md_file.references {
-                if let Some(target_path) = resolve_reference_target(
-                    reference,
-                    &source_path,
-                    &old.root_dir,
-                    old,
-                ) {
+                if let Some(target_path) =
+                    resolve_reference_target(reference, &source_path, &old.root_dir, old)
+                {
                     if let Some(&target_idx) = old.node_index.get(&target_path) {
                         old.graph.add_edge(
                             source_idx,
@@ -306,12 +303,17 @@ impl Vault {
     /// Get mutable document node by path
     #[allow(dead_code)] // Public API for consumers
     pub fn get_document_mut(&mut self, path: &Path) -> Option<&mut DocumentNode> {
-        self.node_index.get(path).copied().map(|idx| &mut self.graph[idx])
+        self.node_index
+            .get(path)
+            .copied()
+            .map(|idx| &mut self.graph[idx])
     }
 
     /// Iterate over all documents as (path, node) pairs
     pub fn documents(&self) -> impl Iterator<Item = (&PathBuf, &DocumentNode)> {
-        self.node_index.iter().map(|(path, &idx)| (path, &self.graph[idx]))
+        self.node_index
+            .iter()
+            .map(|(path, &idx)| (path, &self.graph[idx]))
     }
 
     /// Get all document paths
@@ -750,9 +752,11 @@ impl Vault {
                     // Get stable path reference from node_index
                     let path_ref = self.node_index.get_key_value(&target_node.path)?.0;
 
-                    return Some(
-                        self.build_referenceable_for_reference(reference, path_ref, target_node),
-                    );
+                    return Some(self.build_referenceable_for_reference(
+                        reference,
+                        path_ref,
+                        target_node,
+                    ));
                 }
             }
         }
@@ -2449,8 +2453,8 @@ fn resolve_file_link(
     }
 
     // Strategy 2: Absolute path from vault root (for paths starting with /)
-    if file_ref.starts_with('/') {
-        let absolute_path = root_dir.join(&file_ref[1..]).with_extension("md");
+    if let Some(stripped) = file_ref.strip_prefix('/') {
+        let absolute_path = root_dir.join(stripped).with_extension("md");
         if checker.file_exists(&absolute_path) {
             return Some(absolute_path);
         }
