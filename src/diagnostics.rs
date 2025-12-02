@@ -2216,4 +2216,229 @@ For command reference, see {doc}`commands`.
             );
         }
     }
+
+    /// Integration tests against the real TestFiles/ vault.
+    /// These tests verify that the LSP works correctly against a comprehensive
+    /// MyST documentation structure with all reference types.
+    mod testfiles_vault_integration {
+        use super::*;
+        use std::path::PathBuf;
+
+        fn get_testfiles_path() -> PathBuf {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("TestFiles")
+        }
+
+        /// Verify the TestFiles vault can be constructed without errors.
+        #[test]
+        fn test_vault_construction() {
+            let vault_path = get_testfiles_path();
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault = Vault::construct_vault(&settings, &vault_path)
+                .expect("TestFiles vault should construct successfully");
+
+            // Verify files were indexed
+            assert!(
+                vault.md_files.len() >= 8,
+                "Should have at least 8 markdown files, got {}",
+                vault.md_files.len()
+            );
+        }
+
+        /// Verify valid {doc} references in index.md produce no diagnostics.
+        #[test]
+        fn test_valid_doc_references() {
+            let vault_path = get_testfiles_path();
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault = Vault::construct_vault(&settings, &vault_path).unwrap();
+            let file_path = vault_path.join("index.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            // index.md has valid {doc} references that should resolve
+            if let Some(diags) = &result {
+                let doc_diags: Vec<_> = diags
+                    .iter()
+                    .filter(|d| d.message.contains("document"))
+                    .collect();
+                assert_eq!(
+                    doc_diags.len(),
+                    0,
+                    "Valid {{doc}} references should not produce diagnostics: {:?}",
+                    doc_diags
+                );
+            }
+        }
+
+        /// Verify broken-refs.md produces expected diagnostics.
+        #[test]
+        fn test_broken_refs_produce_diagnostics() {
+            let vault_path = get_testfiles_path();
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault = Vault::construct_vault(&settings, &vault_path).unwrap();
+            let file_path = vault_path.join("broken-refs.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "broken-refs.md should have diagnostics");
+            let diags = result.unwrap();
+
+            // Should have diagnostics for broken {doc}, {ref}, {term} references
+            assert!(
+                diags.len() >= 3,
+                "Should have at least 3 broken reference diagnostics, got {}: {:?}",
+                diags.len(),
+                diags
+            );
+
+            // Verify we have document-related diagnostics
+            let has_doc_diagnostic = diags.iter().any(|d| d.message.contains("document"));
+            assert!(
+                has_doc_diagnostic,
+                "Should have diagnostic for broken {{doc}} reference"
+            );
+        }
+
+        /// Verify code-examples.md doesn't produce diagnostics for roles in code blocks.
+        #[test]
+        fn test_code_blocks_excluded() {
+            let vault_path = get_testfiles_path();
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault = Vault::construct_vault(&settings, &vault_path).unwrap();
+            let file_path = vault_path.join("code-examples.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            // code-examples.md has broken refs inside code blocks that should NOT trigger
+            // and valid refs outside code blocks that should resolve
+            if let Some(diags) = &result {
+                // Should not have diagnostics for "should-not-parse", "fake-reference", etc.
+                let code_block_diags: Vec<_> = diags
+                    .iter()
+                    .filter(|d| {
+                        d.message.contains("should-not-parse")
+                            || d.message.contains("fake-reference")
+                            || d.message.contains("NotReal")
+                    })
+                    .collect();
+                assert_eq!(
+                    code_block_diags.len(),
+                    0,
+                    "Roles inside code blocks should not produce diagnostics: {:?}",
+                    code_block_diags
+                );
+            }
+        }
+
+        /// Verify glossary terms are parsed from {glossary} directive.
+        #[test]
+        fn test_glossary_terms_extracted() {
+            let vault_path = get_testfiles_path();
+            let settings = Settings::default();
+
+            let vault = Vault::construct_vault(&settings, &vault_path).unwrap();
+
+            // Find glossary.md and check for glossary terms
+            let glossary_path = vault_path.join("glossary.md");
+            let md_file = vault.md_files.get(&glossary_path);
+
+            assert!(md_file.is_some(), "glossary.md should be indexed");
+            let md_file = md_file.unwrap();
+
+            assert!(
+                !md_file.glossary_terms.is_empty(),
+                "glossary.md should have glossary terms extracted"
+            );
+
+            // Check for expected terms
+            let term_names: Vec<_> = md_file.glossary_terms.iter().map(|t| &t.term).collect();
+            assert!(
+                term_names.iter().any(|t| t.contains("API")),
+                "Should have API term: {:?}",
+                term_names
+            );
+            assert!(
+                term_names.iter().any(|t| t.contains("MyST")),
+                "Should have MyST term: {:?}",
+                term_names
+            );
+        }
+
+        /// Verify MyST anchors are extracted from (anchor)= syntax.
+        #[test]
+        fn test_myst_anchors_extracted() {
+            let vault_path = get_testfiles_path();
+            let settings = Settings::default();
+
+            let vault = Vault::construct_vault(&settings, &vault_path).unwrap();
+
+            // Check getting-started.md for anchors
+            let gs_path = vault_path.join("guides/getting-started.md");
+            let md_file = vault.md_files.get(&gs_path);
+
+            assert!(md_file.is_some(), "getting-started.md should be indexed");
+            let md_file = md_file.unwrap();
+
+            // Should have installation-anchor
+            let has_installation_anchor = md_file
+                .myst_symbols
+                .iter()
+                .any(|s| s.name == "installation-anchor");
+            assert!(
+                has_installation_anchor,
+                "Should have installation-anchor: {:?}",
+                md_file.myst_symbols
+            );
+        }
+
+        /// Verify cross-file {ref} references work.
+        #[test]
+        fn test_cross_file_ref_resolution() {
+            let vault_path = get_testfiles_path();
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault = Vault::construct_vault(&settings, &vault_path).unwrap();
+
+            // reference/api.md has {ref}`installation-anchor` which points to guides/getting-started.md
+            let file_path = vault_path.join("reference/api.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            if let Some(diags) = &result {
+                // Should NOT have diagnostic for installation-anchor (it exists)
+                let installation_diags: Vec<_> = diags
+                    .iter()
+                    .filter(|d| d.message.contains("installation-anchor"))
+                    .collect();
+                assert_eq!(
+                    installation_diags.len(),
+                    0,
+                    "Cross-file {{ref}} to installation-anchor should resolve: {:?}",
+                    installation_diags
+                );
+            }
+        }
+    }
 }
