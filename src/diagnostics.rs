@@ -2877,7 +2877,8 @@ For command reference, see {doc}`commands`.
             );
 
             // Check for expected terms
-            let term_names: Vec<&String> = doc_node.glossary_terms.iter().map(|t| &t.term).collect();
+            let term_names: Vec<&String> =
+                doc_node.glossary_terms.iter().map(|t| &t.term).collect();
             assert!(
                 term_names.iter().any(|t| t.contains("API")),
                 "Should have API term: {:?}",

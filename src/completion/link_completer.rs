@@ -384,25 +384,27 @@ impl LinkCompletion<'_> {
             Some(vec![DailyNote(daily)])
         } else {
             match referenceable {
-                Referenceable::File(_, doc_node) => {
-                    Some(
-                        once(File {
-                            doc_node,
-                            match_string: doc_node.file_name()?.to_string(),
-                            referenceable: referenceable.clone(),
-                        })
-                        .chain(doc_node.metadata.iter().flat_map(|it| it.aliases()).flat_map(
-                            |alias| {
+                Referenceable::File(_, doc_node) => Some(
+                    once(File {
+                        doc_node,
+                        match_string: doc_node.file_name()?.to_string(),
+                        referenceable: referenceable.clone(),
+                    })
+                    .chain(
+                        doc_node
+                            .metadata
+                            .iter()
+                            .flat_map(|it| it.aliases())
+                            .flat_map(|alias| {
                                 Some(Alias {
                                     filename: doc_node.file_name()?,
                                     match_string: alias,
                                     referenceable: referenceable.clone(),
                                 })
-                            },
-                        ))
-                        .collect(),
+                            }),
                     )
-                }
+                    .collect(),
+                ),
                 Referenceable::Heading(path, mdheading) => Some(
                     once(Heading {
                         heading: mdheading,

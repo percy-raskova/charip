@@ -74,7 +74,7 @@ jobs:
       - name: Build archive
         shell: bash
         run: |
-          binary_name="markdown-oxide"
+          binary_name="charip"
 
           dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
           mkdir "$dirname"
