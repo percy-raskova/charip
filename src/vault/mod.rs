@@ -29,7 +29,10 @@ use rayon::prelude::*;
 use regex::Regex;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
-use tower_lsp::lsp_types::{Location, Position, SymbolInformation, SymbolKind, Url};
+use tower_lsp::lsp_types::{
+    DocumentChangeOperation, Location, OneOf, OptionalVersionedTextDocumentIdentifier, Position,
+    RenameFile, ResourceOp, SymbolInformation, SymbolKind, TextDocumentEdit, TextEdit, Url,
+};
 use walkdir::WalkDir;
 
 impl Vault {
@@ -1671,6 +1674,130 @@ impl Referenceable<'_> {
                 | Referenceable::UnresovledFile(..)
                 | Referenceable::UnresovledIndexedBlock(..)
         )
+    }
+
+    /// Returns a static string identifying the referenceable type.
+    ///
+    /// Useful for diagnostics, logging, and debugging without needing
+    /// to match on all variants.
+    pub fn referenceable_type_name(&self) -> &'static str {
+        match self {
+            Referenceable::File(..) => "file",
+            Referenceable::Heading(..) => "heading",
+            Referenceable::IndexedBlock(..) => "indexed_block",
+            Referenceable::Tag(..) => "tag",
+            Referenceable::Footnote(..) => "footnote",
+            Referenceable::UnresovledFile(..) => "unresolved_file",
+            Referenceable::UnresolvedHeading(..) => "unresolved_heading",
+            Referenceable::UnresovledIndexedBlock(..) => "unresolved_indexed_block",
+            Referenceable::LinkRefDef(..) => "link_ref_def",
+            Referenceable::MystAnchor(..) => "myst_anchor",
+            Referenceable::GlossaryTerm(..) => "glossary_term",
+            Referenceable::MathLabel(..) => "math_label",
+            Referenceable::SubstitutionDef(..) => "substitution_def",
+        }
+    }
+
+    /// Returns whether this referenceable type can be renamed.
+    ///
+    /// Rename is supported for:
+    /// - File: Renames the file on disk
+    /// - Heading: Changes the heading text
+    /// - Tag: Updates all tag occurrences
+    /// - MystAnchor: Changes the anchor name
+    ///
+    /// Other types (footnotes, indexed blocks, etc.) do not support rename.
+    pub fn is_renameable(&self) -> bool {
+        matches!(
+            self,
+            Referenceable::File(..)
+                | Referenceable::Heading(..)
+                | Referenceable::Tag(..)
+                | Referenceable::MystAnchor(..)
+        )
+    }
+
+    /// Generate the definition-side edit for a rename operation.
+    ///
+    /// This method consolidates the logic for generating the edit that modifies
+    /// the definition itself (heading text, file path, anchor name, etc.) when
+    /// renaming a referenceable.
+    ///
+    /// # Arguments
+    /// * `new_name` - The new name for the referenceable
+    ///
+    /// # Returns
+    /// * `None` - This referenceable type doesn't support rename
+    /// * `Some((None, ref_name))` - Rename supported but no definition edit needed (e.g., Tag)
+    /// * `Some((Some(op), ref_name))` - Definition edit and the new reference name for updating refs
+    ///
+    /// The returned `ref_name` is used by `Reference::get_rename_text()` to update all
+    /// references pointing to this referenceable.
+    pub fn get_definition_rename_edit(
+        &self,
+        new_name: &str,
+    ) -> Option<(Option<DocumentChangeOperation>, String)> {
+        match self {
+            Referenceable::Heading(path, heading) => {
+                let new_text = format!("{} {}", "#".repeat(heading.level.0), new_name);
+
+                let change_op = DocumentChangeOperation::Edit(TextDocumentEdit {
+                    text_document: OptionalVersionedTextDocumentIdentifier {
+                        uri: Url::from_file_path(path).ok()?,
+                        version: None,
+                    },
+                    edits: vec![OneOf::Left(TextEdit {
+                        range: *heading.range,
+                        new_text,
+                    })],
+                });
+
+                // Format: {filename}#{new heading name}
+                let ref_name = format!(
+                    "{}#{}",
+                    path.file_stem()?.to_string_lossy(),
+                    new_name
+                );
+
+                Some((Some(change_op), ref_name))
+            }
+            Referenceable::File(path, _file) => {
+                let new_path = path.with_file_name(new_name).with_extension("md");
+
+                let change_op = DocumentChangeOperation::Op(ResourceOp::Rename(RenameFile {
+                    old_uri: Url::from_file_path(path).ok()?,
+                    new_uri: Url::from_file_path(new_path).ok()?,
+                    options: None,
+                    annotation_id: None,
+                }));
+
+                Some((Some(change_op), new_name.to_string()))
+            }
+            Referenceable::Tag(_path, _tag) => {
+                // Tags don't have a definition to edit, but they ARE renameable
+                // (all tag references get updated)
+                Some((None, new_name.to_string()))
+            }
+            Referenceable::MystAnchor(anchor_path, symbol) => {
+                // Rename MyST anchor: (old-name)= -> (new-name)=
+                let new_text = format!("({})=", new_name);
+
+                let change_op = DocumentChangeOperation::Edit(TextDocumentEdit {
+                    text_document: OptionalVersionedTextDocumentIdentifier {
+                        uri: Url::from_file_path(anchor_path).ok()?,
+                        version: None,
+                    },
+                    edits: vec![OneOf::Left(TextEdit {
+                        range: *symbol.range,
+                        new_text,
+                    })],
+                });
+
+                Some((Some(change_op), new_name.to_string()))
+            }
+            // Other referenceable types don't support rename
+            _ => None,
+        }
     }
 }
 

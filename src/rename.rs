@@ -3,7 +3,7 @@ use std::path::Path;
 
 use tower_lsp::lsp_types::{
     DocumentChangeOperation, DocumentChanges, OneOf, OptionalVersionedTextDocumentIdentifier,
-    RenameFile, RenameParams, ResourceOp, TextDocumentEdit, TextEdit, Url, WorkspaceEdit,
+    RenameParams, ResourceOp, TextDocumentEdit, TextEdit, Url, WorkspaceEdit,
 };
 
 use crate::vault::{MystRoleKind, Reference, Referenceable, Vault};
@@ -45,74 +45,9 @@ pub fn rename(vault: &Vault, params: &RenameParams, path: &Path) -> Option<Works
         .and_then(|reference| resolve_myst_role_to_anchor(vault, reference, path))
         .or_else(|| vault.select_referenceable_at_position(path, position))?;
 
-    let (referenceable_document_change, new_ref_name): (Option<DocumentChangeOperation>, String) =
-        match referenceable {
-            Referenceable::Heading(path, heading) => {
-                let new_text = format!("{} {}", "#".repeat(heading.level.0), params.new_name);
-
-                let change_op = DocumentChangeOperation::Edit(TextDocumentEdit {
-                    text_document: tower_lsp::lsp_types::OptionalVersionedTextDocumentIdentifier {
-                        uri: Url::from_file_path(path).ok()?,
-                        version: None,
-                    },
-                    edits: vec![OneOf::Left(TextEdit {
-                        range: *heading.range,
-                        new_text,
-                    })],
-                });
-
-                // {path name}#{new name}
-                let name = format!(
-                    "{}#{}",
-                    path.file_stem()?.to_string_lossy().clone(),
-                    params.new_name
-                );
-
-                (Some(change_op), name.to_string())
-            }
-            Referenceable::File(path, _file) => {
-                let new_path = path.with_file_name(&params.new_name).with_extension("md");
-
-                let change_op = DocumentChangeOperation::Op(ResourceOp::Rename(RenameFile {
-                    old_uri: Url::from_file_path(path).ok()?,
-                    new_uri: Url::from_file_path(new_path.clone()).ok()?,
-                    options: None,
-                    annotation_id: None,
-                }));
-
-                let name = params.new_name.clone();
-
-                (Some(change_op), name)
-            }
-            Referenceable::Tag(_path, _tag) => {
-                let new_ref_name = params.new_name.clone();
-
-                let _new_tag = format!("#{}", new_ref_name);
-
-                (None, new_ref_name)
-            }
-            Referenceable::MystAnchor(anchor_path, symbol) => {
-                // Rename MyST anchor: (old-name)= -> (new-name)=
-                let new_text = format!("({})=", params.new_name);
-
-                let change_op = DocumentChangeOperation::Edit(TextDocumentEdit {
-                    text_document: OptionalVersionedTextDocumentIdentifier {
-                        uri: Url::from_file_path(anchor_path).ok()?,
-                        version: None,
-                    },
-                    edits: vec![OneOf::Left(TextEdit {
-                        range: *symbol.range,
-                        new_text,
-                    })],
-                });
-
-                // The new reference name is just the anchor name (without parens and =)
-                let new_ref_name = params.new_name.clone();
-
-                (Some(change_op), new_ref_name)
-            }
-            _ => return None,
-        };
+    // Use the ReferenceableOps method to generate the definition-side edit
+    let (referenceable_document_change, new_ref_name) =
+        referenceable.get_definition_rename_edit(&params.new_name)?;
 
     let references = vault.select_references_for_referenceable(&referenceable)?;
 
