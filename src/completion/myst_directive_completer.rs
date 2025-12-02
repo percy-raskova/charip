@@ -316,8 +316,7 @@ mod tests {
     // Test helpers
     // =========================================================================
 
-    /// Creates a minimal test context for pattern matching tests.
-    /// These tests focus on regex pattern matching, not vault integration.
+    // Note: These tests focus on regex pattern matching, not vault integration.
 
     // =========================================================================
     // RED PHASE: Tests for fence pattern detection

@@ -101,7 +101,6 @@ impl<'a> Completer<'a> for UnindexedBlockCompleter<'a, MarkdownLinkCompleter<'a>
     }
 }
 
-
 struct UnindexedBlock<'a>(Block<'a>);
 
 impl<'a> UnindexedBlock<'a> {
@@ -249,7 +248,6 @@ impl<'a> Completable<'a, UnindexedBlockCompleter<'a, MarkdownLinkCompleter<'a>>>
         })
     }
 }
-
 
 impl Matchable for UnindexedBlock<'_> {
     fn match_string(&self) -> &str {

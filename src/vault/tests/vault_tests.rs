@@ -961,7 +961,7 @@ fn parse_weird_url_encoded_file_link() {
     // URL-encoded filename with unicode and special characters.
     // Note: The decoded URL contains `#` which is interpreted as a fragment separator.
     // This is correct URL behavior - if you want a literal `#` in the path, use `%2523`.
-    let text = "[f](%D1%84%D0%B0%D0%B9%D0%BB%20with%20%C3%A9mojis%20%F0%9F%9A%80%20%26%20symbols%20%21%23%40%24%25%26%2A%28%29%2B%3D%7B%7D%7C%5C%22%5C%5C%3A%3B%3F)".into();
+    let text = "[f](%D1%84%D0%B0%D0%B9%D0%BB%20with%20%C3%A9mojis%20%F0%9F%9A%80%20%26%20symbols%20%21%23%40%24%25%26%2A%28%29%2B%3D%7B%7D%7C%5C%22%5C%5C%3A%3B%3F)";
 
     let parsed = Reference::new(text, "test.md").collect_vec();
 

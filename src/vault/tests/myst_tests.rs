@@ -1,17 +1,8 @@
 use crate::config::Settings;
 use crate::myst_parser::MystSymbolKind;
+use crate::test_utils::create_test_vault_dir;
 use crate::vault::*;
 use std::fs;
-use tempfile::TempDir;
-
-/// Helper to create a test vault directory (avoids hidden .tmp dirs)
-fn create_test_vault_dir() -> (TempDir, std::path::PathBuf) {
-    let temp_dir = TempDir::new().unwrap();
-    // Create a non-hidden subdirectory since WalkDir filters out .* dirs
-    let vault_dir = temp_dir.path().join("vault");
-    fs::create_dir(&vault_dir).unwrap();
-    (temp_dir, vault_dir)
-}
 
 #[test]
 fn test_vault_extracts_myst_directives() {

@@ -35,6 +35,8 @@ mod myst_parser;
 mod references;
 mod rename;
 mod symbol;
+#[cfg(test)]
+mod test_utils;
 mod tokens;
 mod ui;
 mod vault;

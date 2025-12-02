@@ -38,9 +38,7 @@ impl Vault {
             .into_iter()
             .filter_entry(|e| {
                 // Skip hidden directories (starting with '.')
-                !e.file_name()
-                    .to_str()
-                    .is_some_and(|s| s.starts_with('.'))
+                !e.file_name().to_str().is_some_and(|s| s.starts_with('.'))
             })
             .flatten()
             .filter(|f| f.path().extension().and_then(|e| e.to_str()) == Some("md"))
