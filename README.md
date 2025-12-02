@@ -7,8 +7,6 @@
 
 <h1 align="center">
   <br>
-  🇰🇵
-  <br>
   <code>자립</code> charip-lsp
   <br>
 </h1>
@@ -78,18 +76,22 @@ cargo install --locked --path .
 
 # Or build locally
 cargo build --release
-# Binary at target/release/markdown-oxide
+# Binary at target/release/charip
 ```
 
 ## Usage
 
-Configure your editor to use `markdown-oxide` as the language server for `.md` files.
+Configure your editor to use `charip` as the language server for `.md` files.
 
 <details>
 <summary><strong>Neovim (nvim-lspconfig)</strong></summary>
 
+Add to your LSP configuration (charip uses the same protocol as markdown-oxide):
+
 ```lua
+-- Option 1: Use existing markdown_oxide config name
 require("lspconfig").markdown_oxide.setup({
+    cmd = { "charip" },  -- Point to charip binary
     capabilities = vim.tbl_deep_extend('force',
         require("cmp_nvim_lsp").default_capabilities(),
         { workspace = { didChangeWatchedFiles = { dynamicRegistration = true } } }
@@ -101,13 +103,22 @@ require("lspconfig").markdown_oxide.setup({
 <details>
 <summary><strong>VS Code</strong></summary>
 
-Use the [Markdown Oxide extension](https://marketplace.visualstudio.com/items?itemName=FelixZeller.markdown-oxide) and point it to your local binary.
+Use the [Markdown Oxide extension](https://marketplace.visualstudio.com/items?itemName=FelixZeller.markdown-oxide) and configure it to use the `charip` binary.
 </details>
 
 <details>
 <summary><strong>Helix</strong></summary>
 
-Install the binary to your path — Helix auto-detects `markdown-oxide`.
+Add to `~/.config/helix/languages.toml`:
+
+```toml
+[language-server.charip]
+command = "charip"
+
+[[language]]
+name = "markdown"
+language-servers = ["charip"]
+```
 </details>
 
 ## Philosophy
@@ -119,7 +130,7 @@ Install the binary to your path — Helix auto-detects `markdown-oxide`.
 This project embodies that principle:
 1. MyST/Sphinx documentation deserves first-class editor support
 2. Technical writers shouldn't have to choose between rich markup and IDE features
-3. Revolutionary movements need revolutionary infrastructure — build your own tools
+3. If existing tools don't meet your needs, build your own
 
 ## Status
 
@@ -130,8 +141,11 @@ This project embodies that principle:
 | 2.5 | Directive labels | ✅ Complete |
 | 3 | Directive autocomplete | ✅ Complete |
 | 4 | Role target autocomplete | ✅ Complete |
+| 5 | Anchor rename from roles | ✅ Complete |
+| 6 | Glossary term completion | ✅ Complete |
+| 7 | MyST role diagnostics | ✅ Complete |
 
-**149 tests passing**
+**194 tests passing**
 
 ## Development
 
