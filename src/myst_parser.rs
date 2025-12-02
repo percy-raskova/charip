@@ -3,6 +3,17 @@ use ropey::Rope;
 
 use crate::vault::MyRange;
 
+/// A glossary term extracted from a `{glossary}` directive.
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub struct GlossaryTerm {
+    /// The term name (e.g., "MyST")
+    pub term: String,
+    /// The definition text
+    pub definition: String,
+    /// LSP-compatible range for go-to-definition navigation
+    pub range: MyRange,
+}
+
 /// Type-safe representation of MyST symbol kinds.
 /// Using an enum prevents typos and enables compile-time checking.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
@@ -22,6 +33,158 @@ pub struct MystSymbol {
     pub range: MyRange,
     /// Extracted from `:label:` or `:name:` directive options
     pub label: Option<String>,
+}
+
+/// Parse glossary terms from MyST document text.
+///
+/// Extracts terms from `{glossary}` directives. Each term is identified
+/// by a line starting with non-whitespace followed by indented definition lines.
+///
+/// # Example
+/// ```ignore
+/// ```{glossary}
+/// MyST
+///   Markedly Structured Text, an extended Markdown syntax.
+/// ```
+/// ```
+pub fn parse_glossary_terms(text: &str) -> Vec<GlossaryTerm> {
+    let options = ParseOptions::default();
+    let rope = Rope::from_str(text);
+
+    match to_mdast(text, &options) {
+        Ok(ast) => {
+            let mut terms = vec![];
+            extract_glossary_terms(&ast, &rope, &mut terms);
+            terms
+        }
+        Err(_) => vec![],
+    }
+}
+
+/// Extract glossary terms from AST nodes.
+fn extract_glossary_terms(node: &Node, rope: &Rope, terms: &mut Vec<GlossaryTerm>) {
+    // Recurse into children first
+    if let Some(children) = node.children() {
+        for child in children {
+            extract_glossary_terms(child, rope, terms);
+        }
+    }
+
+    // Look for code blocks with {glossary} language
+    if let Node::Code(code) = node {
+        if let Some(lang) = &code.lang {
+            if lang.starts_with('{') && lang.ends_with('}') {
+                let directive = lang.trim_matches(|c| c == '{' || c == '}');
+                if directive == "glossary" {
+                    // Parse the glossary content
+                    let content = &code.value;
+                    let base_line = code.position.as_ref().map(|p| p.start.line).unwrap_or(0);
+
+                    parse_glossary_content(content, base_line, rope, terms);
+                }
+            }
+        }
+    }
+}
+
+/// Parse the content of a glossary directive to extract terms.
+///
+/// Glossary format:
+/// ```text
+/// Term Name
+///   Definition line 1
+///   Definition line 2
+///
+/// Another Term
+///   Another definition
+/// ```
+fn parse_glossary_content(
+    content: &str,
+    base_line: usize,
+    rope: &Rope,
+    terms: &mut Vec<GlossaryTerm>,
+) {
+    let mut current_term: Option<String> = None;
+    let mut current_definition: Vec<String> = vec![];
+    let mut term_line: usize = 0;
+
+    // Helper closure to save the current term and clear state.
+    // This eliminates duplication between the mid-parse save and final save.
+    let save_current_term = |term: String,
+                                  definition: &mut Vec<String>,
+                                  saved_line: usize,
+                                  terms: &mut Vec<GlossaryTerm>| {
+        let definition_text = definition.join(" ");
+        // base_line is from markdown-rs (1-indexed). Adding term_line gives
+        // the 0-indexed LSP line number for this term.
+        let range = calculate_term_range(base_line + saved_line, &term, rope);
+        terms.push(GlossaryTerm {
+            term,
+            definition: definition_text,
+            range,
+        });
+        definition.clear();
+    };
+
+    for (line_idx, line) in content.lines().enumerate() {
+        // Skip directive option lines like `:sorted:`
+        if line.trim_start().starts_with(':') && line.trim_start().contains(':') {
+            let trimmed = line.trim();
+            if trimmed.starts_with(':') && trimmed.ends_with(':') {
+                continue;
+            }
+        }
+
+        let is_indented = line.starts_with(' ') || line.starts_with('\t');
+        let is_empty = line.trim().is_empty();
+
+        if is_empty {
+            continue;
+        }
+
+        if is_indented {
+            // Definition line: append to current term's definition
+            if current_term.is_some() {
+                current_definition.push(line.trim().to_string());
+            }
+        } else {
+            // New term line: save previous term if any, then start new term
+            if let Some(term) = current_term.take() {
+                save_current_term(term, &mut current_definition, term_line, terms);
+            }
+            current_term = Some(line.trim().to_string());
+            term_line = line_idx;
+        }
+    }
+
+    // Save the final term (the loop only saves when encountering a new term)
+    if let Some(term) = current_term {
+        save_current_term(term, &mut current_definition, term_line, terms);
+    }
+}
+
+/// Calculate the LSP range for a glossary term.
+///
+/// Currently uses a simplified approach: the range spans from column 0 to
+/// the term's character length. This works well for typical glossary entries
+/// where terms start at the beginning of a line.
+///
+/// The `_rope` parameter is accepted for API consistency with other range
+/// calculation functions in the codebase, which use it for byte-offset-to-
+/// line/character conversion. Future enhancements may use it for precise
+/// Unicode character counting.
+fn calculate_term_range(line: usize, term: &str, _rope: &Rope) -> MyRange {
+    use tower_lsp::lsp_types::{Position, Range};
+    MyRange(Range {
+        start: Position {
+            line: line as u32,
+            character: 0,
+        },
+        end: Position {
+            line: line as u32,
+            character: term.len() as u32,
+        },
+    })
 }
 
 pub fn parse(text: &str) -> Vec<MystSymbol> {
@@ -311,5 +474,126 @@ This is a note
         assert!(symbols
             .iter()
             .any(|s| s.kind == MystSymbolKind::Anchor && s.name == "my-target"));
+    }
+
+    // ========================================================================
+    // Glossary term extraction tests (RED PHASE)
+    // ========================================================================
+
+    #[test]
+    fn test_parse_glossary_directive_extracts_terms() {
+        let input = r#"```{glossary}
+MyST
+  Markedly Structured Text, an extended Markdown syntax.
+
+Sphinx
+  A documentation generator for Python projects.
+```"#;
+        let terms = parse_glossary_terms(input);
+
+        assert_eq!(terms.len(), 2);
+        assert!(terms.iter().any(|t| t.term == "MyST"));
+        assert!(terms.iter().any(|t| t.term == "Sphinx"));
+    }
+
+    #[test]
+    fn test_glossary_term_has_definition() {
+        let input = r#"```{glossary}
+MyST
+  Markedly Structured Text, an extended Markdown syntax.
+```"#;
+        let terms = parse_glossary_terms(input);
+
+        assert_eq!(terms.len(), 1);
+        let term = &terms[0];
+        assert_eq!(term.term, "MyST");
+        assert!(term.definition.contains("Markedly Structured Text"));
+    }
+
+    #[test]
+    fn test_glossary_term_has_range() {
+        let input = r#"```{glossary}
+MyST
+  Definition here.
+```"#;
+        let terms = parse_glossary_terms(input);
+
+        assert_eq!(terms.len(), 1);
+        let term = &terms[0];
+        // Term "MyST" is on line 1 (0-indexed)
+        assert_eq!(term.range.start.line, 1);
+    }
+
+    #[test]
+    fn test_glossary_multiline_definition() {
+        let input = r#"```{glossary}
+Term
+  First line of definition.
+  Second line of definition.
+
+Another Term
+  Another definition.
+```"#;
+        let terms = parse_glossary_terms(input);
+
+        assert_eq!(terms.len(), 2);
+        let term = terms.iter().find(|t| t.term == "Term").unwrap();
+        assert!(term.definition.contains("First line"));
+        assert!(term.definition.contains("Second line"));
+    }
+
+    #[test]
+    fn test_glossary_term_with_sorted_option() {
+        // Glossary can have :sorted: option which we should ignore when parsing terms
+        let input = r#"```{glossary}
+:sorted:
+
+Alpha
+  First term alphabetically.
+
+Beta
+  Second term.
+```"#;
+        let terms = parse_glossary_terms(input);
+
+        assert_eq!(terms.len(), 2);
+        assert!(terms.iter().any(|t| t.term == "Alpha"));
+        assert!(terms.iter().any(|t| t.term == "Beta"));
+    }
+
+    #[test]
+    fn test_no_glossary_terms_in_regular_directive() {
+        let input = r#"```{note}
+This is not a glossary.
+```"#;
+        let terms = parse_glossary_terms(input);
+
+        assert!(terms.is_empty());
+    }
+
+    #[test]
+    fn test_glossary_terms_in_document_with_multiple_directives() {
+        let input = r#"# Introduction
+
+```{note}
+A note before the glossary.
+```
+
+```{glossary}
+Term1
+  First term.
+
+Term2
+  Second term.
+```
+
+```{warning}
+A warning after.
+```"#;
+        let terms = parse_glossary_terms(input);
+
+        assert_eq!(terms.len(), 2);
+        assert!(terms.iter().any(|t| t.term == "Term1"));
+        assert!(terms.iter().any(|t| t.term == "Term2"));
     }
 }

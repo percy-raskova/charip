@@ -32,6 +32,8 @@ pub enum RoleType {
     Doc,
     /// {download}`path` - downloadable file reference
     Download,
+    /// {term}`glossary-term` - glossary term reference
+    Term,
 }
 
 impl RoleType {
@@ -42,6 +44,7 @@ impl RoleType {
             RoleType::NumRef => "numref",
             RoleType::Doc => "doc",
             RoleType::Download => "download",
+            RoleType::Term => "term",
         }
     }
 }
@@ -76,10 +79,10 @@ impl<'a> Completer<'a> for MystRoleCompleter<'a> {
         let line_string = String::from_iter(line_chars);
 
         // Pattern: {role}`partial_target
-        // where role is one of: ref, numref, doc, download
+        // where role is one of: ref, numref, doc, download, term
         // We match up to the cursor position, target may be incomplete
         static ROLE_TARGET_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\{(?<role>ref|numref|doc|download)\}`(?<target>[^`]*)$").unwrap()
+            Regex::new(r"\{(?<role>ref|numref|doc|download|term)\}`(?<target>[^`]*)$").unwrap()
         });
 
         // Get the text up to the cursor position
@@ -99,6 +102,7 @@ impl<'a> Completer<'a> for MystRoleCompleter<'a> {
             "numref" => RoleType::NumRef,
             "doc" => RoleType::Doc,
             "download" => RoleType::Download,
+            "term" => RoleType::Term,
             _ => return None,
         };
 
@@ -211,6 +215,16 @@ impl RoleCompletion {
                     kind: CompletionItemKind::FILE,
                 })
             }
+            // {term} completes glossary terms
+            (RoleType::Term, Referenceable::GlossaryTerm(path, term)) => {
+                let detail = get_relative_ref_path(vault.root_dir(), path);
+                Some(RoleCompletion {
+                    label: term.term.clone(),
+                    insert_text: term.term.clone(),
+                    detail,
+                    kind: CompletionItemKind::TEXT,
+                })
+            }
             _ => None,
         }
     }
@@ -290,10 +304,15 @@ mod tests {
     // Test helpers
     // =========================================================================
 
-    /// Parse a role pattern from text, returning (role_type, partial_target)
+    /// Parse a role pattern from text, returning (role_type, partial_target).
+    ///
+    /// This helper mirrors the regex logic in `MystRoleCompleter::construct`,
+    /// enabling unit tests to verify pattern matching without constructing
+    /// a full vault context.
     fn parse_role_pattern(text: &str, cursor_pos: usize) -> Option<(RoleType, String)> {
+        // Pattern includes all supported role types (ref, numref, doc, download, term)
         static ROLE_TARGET_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\{(?<role>ref|numref|doc|download)\}`(?<target>[^`]*)$").unwrap()
+            Regex::new(r"\{(?<role>ref|numref|doc|download|term)\}`(?<target>[^`]*)$").unwrap()
         });
 
         let text_before_cursor = if cursor_pos <= text.len() {
@@ -312,6 +331,7 @@ mod tests {
             "numref" => RoleType::NumRef,
             "doc" => RoleType::Doc,
             "download" => RoleType::Download,
+            "term" => RoleType::Term,
             _ => return None,
         };
 
@@ -527,6 +547,49 @@ mod tests {
         #[test]
         fn test_heading_with_multiple_spaces() {
             assert_eq!(slugify_heading("My   Heading"), "my-heading");
+        }
+    }
+
+    // =========================================================================
+    // Tests for {term} role pattern detection
+    // =========================================================================
+
+    mod term_role_tests {
+        use super::*;
+
+        #[test]
+        fn test_term_role_with_empty_target() {
+            let input = "{term}`";
+            let result = parse_role_pattern(input, input.len());
+            assert!(result.is_some(), "Should match {{term}}` pattern");
+            let (role_type, partial) = result.unwrap();
+            assert_eq!(role_type, RoleType::Term);
+            assert_eq!(partial, "");
+        }
+
+        #[test]
+        fn test_term_role_with_partial_target() {
+            let input = "{term}`My";
+            let result = parse_role_pattern(input, input.len());
+            assert!(result.is_some(), "Should match {{term}}`partial pattern");
+            let (role_type, partial) = result.unwrap();
+            assert_eq!(role_type, RoleType::Term);
+            assert_eq!(partial, "My");
+        }
+
+        #[test]
+        fn test_term_role_in_sentence() {
+            let input = "The {term}`dialectical";
+            let result = parse_role_pattern(input, input.len());
+            assert!(result.is_some(), "Should match {{term}}` in sentence");
+            let (role_type, partial) = result.unwrap();
+            assert_eq!(role_type, RoleType::Term);
+            assert_eq!(partial, "dialectical");
+        }
+
+        #[test]
+        fn test_term_role_name() {
+            assert_eq!(RoleType::Term.name(), "term");
         }
     }
 }

@@ -514,6 +514,12 @@ impl Vault {
                     .map(String::from_iter)
                     .map(Into::into)
             }
+            Referenceable::GlossaryTerm(path, term) => {
+                // Show the term name and definition preview
+                self.select_line(path, term.range.start.line as isize)
+                    .map(String::from_iter)
+                    .map(Into::into)
+            }
         }
     }
 
@@ -580,11 +586,14 @@ pub struct MDFile {
     pub metadata: Option<MDMetadata>,
     pub codeblocks: Vec<MDCodeBlock>,
     pub myst_symbols: Vec<MystSymbol>,
+    /// Glossary terms extracted from `{glossary}` directives
+    pub glossary_terms: Vec<GlossaryTerm>,
 }
 
 impl MDFile {
     fn new(context: &Settings, text: &str, path: PathBuf) -> MDFile {
         let myst_symbols = myst_parser::parse(text);
+        let glossary_terms = myst_parser::parse_glossary_terms(text);
         let code_blocks = MDCodeBlock::new(text).collect_vec();
         let file_name = path
             .file_stem()
@@ -630,6 +639,7 @@ impl MDFile {
             metadata,
             codeblocks: code_blocks,
             myst_symbols,
+            glossary_terms,
         }
     }
 
@@ -651,6 +661,7 @@ impl MDFile {
             metadata: _,
             codeblocks: _,
             myst_symbols,
+            glossary_terms,
         } = self;
 
         iter::once(Referenceable::File(&self.path, self))
@@ -680,6 +691,11 @@ impl MDFile {
                     .iter()
                     .filter(|s| s.kind == MystSymbolKind::Anchor)
                     .map(|anchor| Referenceable::MystAnchor(&self.path, anchor)),
+            )
+            .chain(
+                glossary_terms
+                    .iter()
+                    .map(|term| Referenceable::GlossaryTerm(&self.path, term)),
             )
             .collect()
     }
@@ -744,7 +760,7 @@ impl Default for Reference {
 use Reference::*;
 
 use crate::config::Settings;
-use crate::myst_parser::{self, MystSymbol, MystSymbolKind};
+use crate::myst_parser::{self, GlossaryTerm, MystSymbol, MystSymbolKind};
 
 use self::{metadata::MDMetadata, parsing::MDCodeBlock};
 
@@ -898,6 +914,19 @@ impl Reference {
                 Footnote(_) => false,
                 LinkRef(_) => false,
                 MystRole(..) => false, // Other role types don't reference anchors
+            },
+            Referenceable::GlossaryTerm(_, glossary_term) => match self {
+                // {term}`term-name` roles reference glossary terms
+                MystRole(_, MystRoleKind::Term, target) => {
+                    target.to_lowercase() == glossary_term.term.to_lowercase()
+                }
+                Tag(_) => false,
+                MDFileLink(_) => false,
+                MDHeadingLink(_, _, _) => false,
+                MDIndexedBlockLink(_, _, _) => false,
+                Footnote(_) => false,
+                LinkRef(_) => false,
+                MystRole(..) => false, // Other role types don't reference glossary terms
             },
         }
     }
@@ -1059,6 +1088,8 @@ pub enum Referenceable<'a> {
     LinkRefDef(&'a PathBuf, &'a MDLinkReferenceDefinition),
     /// MyST anchor target: `(my-target)=`
     MystAnchor(&'a PathBuf, &'a MystSymbol),
+    /// Glossary term: term name referenced via `{term}`term``
+    GlossaryTerm(&'a PathBuf, &'a GlossaryTerm),
 }
 impl Referenceable<'_> {
     /// Gets the generic reference name for a referenceable. This will not include any display text. If trying to determine if text is a reference of a particular referenceable, use the `is_reference` function
@@ -1132,6 +1163,11 @@ impl Referenceable<'_> {
                 infile_ref: Some(symbol.name.clone()),
                 path: None,
             }),
+            Referenceable::GlossaryTerm(_, glossary_term) => Some(Refname {
+                full_refname: glossary_term.term.clone(),
+                infile_ref: Some(glossary_term.term.clone()),
+                path: None,
+            }),
         }
     }
 
@@ -1199,6 +1235,7 @@ impl Referenceable<'_> {
             Referenceable::UnresolvedHeading(path, ..) => path,
             Referenceable::LinkRefDef(path, ..) => path,
             Referenceable::MystAnchor(path, ..) => path,
+            Referenceable::GlossaryTerm(path, ..) => path,
         }
     }
 
@@ -1214,6 +1251,7 @@ impl Referenceable<'_> {
             | Referenceable::UnresolvedHeading(..)
             | Referenceable::UnresovledIndexedBlock(..) => None,
             Referenceable::MystAnchor(_, symbol) => Some(symbol.range),
+            Referenceable::GlossaryTerm(_, term) => Some(term.range),
         }
     }
 
