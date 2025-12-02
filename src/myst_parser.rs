@@ -295,6 +295,175 @@ pub fn scan_for_myst(node: &Node, rope: &Rope, symbols: &mut Vec<MystSymbol>) {
     }
 }
 
+/// Represents a toctree directive entry with its caption.
+#[derive(Debug, Clone)]
+pub struct ToctreeEntry {
+    /// Caption from `:caption:` option (applies to all entries in the directive)
+    pub caption: Option<String>,
+    /// File path entries from the toctree content
+    pub entries: Vec<String>,
+}
+
+/// Parse toctree directives from document text.
+///
+/// Returns a list of toctree directives found in the document, each with
+/// its caption (if any) and entry paths.
+///
+/// # Example
+/// ```ignore
+/// let text = r#"
+/// ```{toctree}
+/// :caption: Getting Started
+///
+/// intro
+/// installation
+/// ```
+/// "#;
+/// let toctrees = parse_toctrees(text);
+/// assert_eq!(toctrees.len(), 1);
+/// assert_eq!(toctrees[0].caption, Some("Getting Started".to_string()));
+/// assert_eq!(toctrees[0].entries, vec!["intro", "installation"]);
+/// ```
+pub fn parse_toctrees(text: &str) -> Vec<ToctreeEntry> {
+    use markdown::{to_mdast, ParseOptions};
+
+    let options = ParseOptions::default();
+    match to_mdast(text, &options) {
+        Ok(ast) => {
+            let mut toctrees = vec![];
+            extract_toctrees(&ast, &mut toctrees);
+            toctrees
+        }
+        Err(_) => vec![],
+    }
+}
+
+/// Extract toctree directives from AST nodes.
+fn extract_toctrees(node: &Node, toctrees: &mut Vec<ToctreeEntry>) {
+    // Recurse into children first
+    if let Some(children) = node.children() {
+        for child in children {
+            extract_toctrees(child, toctrees);
+        }
+    }
+
+    // Look for code blocks with {toctree} language
+    if let Node::Code(code) = node {
+        if let Some(lang) = &code.lang {
+            if lang == "{toctree}" {
+                let content = &code.value;
+                let (caption, entries) = parse_toctree_content(content);
+                toctrees.push(ToctreeEntry { caption, entries });
+            }
+        }
+    }
+}
+
+/// Parse the content of a toctree directive.
+///
+/// Extracts:
+/// - `:caption:` option value
+/// - Entry paths (non-empty lines that don't start with `:`)
+fn parse_toctree_content(content: &str) -> (Option<String>, Vec<String>) {
+    let mut caption: Option<String> = None;
+    let mut entries: Vec<String> = vec![];
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Skip empty lines
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Check for options (lines starting with :)
+        if trimmed.starts_with(':') {
+            if let Some(value) = trimmed.strip_prefix(":caption:") {
+                caption = Some(value.trim().to_string());
+            }
+            // Skip other options like :maxdepth:, :hidden:, :glob:, etc.
+            continue;
+        }
+
+        // This is a toctree entry
+        entries.push(trimmed.to_string());
+    }
+
+    (caption, entries)
+}
+
+/// Parse include directives from document text.
+///
+/// Returns a list of file paths referenced by `{include}` directives.
+///
+/// Include directive formats:
+/// - `{include} path/to/file.md` (as directive argument)
+/// - Content may contain the file path
+///
+/// # Example
+/// ```ignore
+/// let text = r#"
+/// ```{include} shared/header.md
+/// ```
+/// "#;
+/// let includes = parse_includes(text);
+/// assert_eq!(includes, vec!["shared/header.md"]);
+/// ```
+pub fn parse_includes(text: &str) -> Vec<String> {
+    use markdown::{to_mdast, ParseOptions};
+
+    let options = ParseOptions::default();
+    match to_mdast(text, &options) {
+        Ok(ast) => {
+            let mut includes = vec![];
+            extract_includes(&ast, &mut includes);
+            includes
+        }
+        Err(_) => vec![],
+    }
+}
+
+/// Extract include directive paths from AST nodes.
+fn extract_includes(node: &Node, includes: &mut Vec<String>) {
+    // Recurse into children first
+    if let Some(children) = node.children() {
+        for child in children {
+            extract_includes(child, includes);
+        }
+    }
+
+    // Look for code blocks with {include} language
+    // MyST include directive can be:
+    // ```{include} path/to/file.md
+    // ```
+    // The file path is the "meta" field (after the language)
+    if let Node::Code(code) = node {
+        if let Some(lang) = &code.lang {
+            if lang == "{include}" || lang == "{literalinclude}" {
+                // The file path is in the meta field (text after language)
+                if let Some(meta) = &code.meta {
+                    let path = meta.trim();
+                    if !path.is_empty() {
+                        includes.push(path.to_string());
+                    }
+                }
+                // Also check the content for alternative syntax
+                let content = code.value.trim();
+                if !content.is_empty() && !content.starts_with(':') {
+                    // First non-option line might be the path
+                    for line in content.lines() {
+                        let trimmed = line.trim();
+                        if !trimmed.is_empty() && !trimmed.starts_with(':') {
+                            includes.push(trimmed.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

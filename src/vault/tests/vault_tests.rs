@@ -436,10 +436,15 @@ fn indexed_block_parsing() {
 
 #[test]
 fn test_linkable_reference() {
+    use crate::vault::graph::DocumentNode;
+
     let path = Path::new("/home/vault/test.md");
     let path_buf = path.to_path_buf();
-    let md_file = MDFile::default();
-    let linkable: Referenceable = Referenceable::File(&path_buf, &md_file);
+    let doc_node = DocumentNode {
+        path: path_buf.clone(),
+        ..Default::default()
+    };
+    let linkable: Referenceable = Referenceable::File(&path_buf, &doc_node);
 
     let root_dir = Path::new("/home/vault");
     let refname = linkable.get_refname(root_dir);

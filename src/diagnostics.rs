@@ -2750,9 +2750,9 @@ For command reference, see {doc}`commands`.
 
             // Verify files were indexed
             assert!(
-                vault.md_files.len() >= 8,
+                vault.node_index.len() >= 8,
                 "Should have at least 8 markdown files, got {}",
-                vault.md_files.len()
+                vault.node_index.len()
             );
         }
 
@@ -2866,18 +2866,18 @@ For command reference, see {doc}`commands`.
 
             // Find glossary.md and check for glossary terms
             let glossary_path = vault_path.join("glossary.md");
-            let md_file = vault.md_files.get(&glossary_path);
+            let doc_node = vault.get_document(&glossary_path);
 
-            assert!(md_file.is_some(), "glossary.md should be indexed");
-            let md_file = md_file.unwrap();
+            assert!(doc_node.is_some(), "glossary.md should be indexed");
+            let doc_node = doc_node.unwrap();
 
             assert!(
-                !md_file.glossary_terms.is_empty(),
+                !doc_node.glossary_terms.is_empty(),
                 "glossary.md should have glossary terms extracted"
             );
 
             // Check for expected terms
-            let term_names: Vec<_> = md_file.glossary_terms.iter().map(|t| &t.term).collect();
+            let term_names: Vec<&String> = doc_node.glossary_terms.iter().map(|t| &t.term).collect();
             assert!(
                 term_names.iter().any(|t| t.contains("API")),
                 "Should have API term: {:?}",
@@ -2900,20 +2900,20 @@ For command reference, see {doc}`commands`.
 
             // Check getting-started.md for anchors
             let gs_path = vault_path.join("guides/getting-started.md");
-            let md_file = vault.md_files.get(&gs_path);
+            let doc_node = vault.get_document(&gs_path);
 
-            assert!(md_file.is_some(), "getting-started.md should be indexed");
-            let md_file = md_file.unwrap();
+            assert!(doc_node.is_some(), "getting-started.md should be indexed");
+            let doc_node = doc_node.unwrap();
 
             // Should have installation-anchor
-            let has_installation_anchor = md_file
+            let has_installation_anchor = doc_node
                 .myst_symbols
                 .iter()
                 .any(|s| s.name == "installation-anchor");
             assert!(
                 has_installation_anchor,
                 "Should have installation-anchor: {:?}",
-                md_file.myst_symbols
+                doc_node.myst_symbols
             );
         }
 

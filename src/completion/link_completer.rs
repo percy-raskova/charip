@@ -13,7 +13,7 @@ use crate::{
     completion::util::check_in_code_block,
     config::Settings,
     ui::preview_referenceable,
-    vault::{MDFile, MDHeading, Reference, Referenceable, Vault},
+    vault::{graph::DocumentNode, MDHeading, Reference, Referenceable, Vault},
 };
 
 use super::{
@@ -346,7 +346,7 @@ impl PartialInfileRef {
 #[derive(Debug, Clone)]
 pub enum LinkCompletion<'a> {
     File {
-        mdfile: &'a MDFile,
+        doc_node: &'a DocumentNode,
         match_string: String,
         referenceable: Referenceable<'a>,
     },
@@ -384,17 +384,17 @@ impl LinkCompletion<'_> {
             Some(vec![DailyNote(daily)])
         } else {
             match referenceable {
-                Referenceable::File(_, mdfile) => {
+                Referenceable::File(_, doc_node) => {
                     Some(
                         once(File {
-                            mdfile,
-                            match_string: mdfile.file_name()?.to_string(),
+                            doc_node,
+                            match_string: doc_node.file_name()?.to_string(),
                             referenceable: referenceable.clone(),
                         })
-                        .chain(mdfile.metadata.iter().flat_map(|it| it.aliases()).flat_map(
+                        .chain(doc_node.metadata.iter().flat_map(|it| it.aliases()).flat_map(
                             |alias| {
                                 Some(Alias {
-                                    filename: mdfile.file_name()?,
+                                    filename: doc_node.file_name()?,
                                     match_string: alias,
                                     referenceable: referenceable.clone(),
                                 })
@@ -539,7 +539,7 @@ impl<'a> Completable<'a, MarkdownLinkCompleter<'a>> for LinkCompletion<'a> {
 
         let link_display_text = match self {
             File {
-                mdfile: _,
+                doc_node: _,
                 match_string: _,
                 ..
             }
@@ -565,7 +565,7 @@ impl<'a> Completable<'a, MarkdownLinkCompleter<'a>> for LinkCompletion<'a> {
             ("", Some(ref infile)) => infile,
             // Get the first heading of the file, if possible.
             ("", None) if markdown_link_completer.settings().title_headings => match self {
-                Self::File { mdfile, .. } => mdfile
+                Self::File { doc_node, .. } => doc_node
                     .headings
                     .first()
                     .map(|heading| heading.heading_text.as_str())
@@ -598,7 +598,7 @@ impl Matchable for LinkCompletion<'_> {
     fn match_string(&self) -> &str {
         match self {
             File {
-                mdfile: _,
+                doc_node: _,
                 match_string,
                 ..
             }
