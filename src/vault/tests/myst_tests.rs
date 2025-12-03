@@ -582,3 +582,114 @@ Content"#;
     // This is acceptable - it's similar to how File referenceable works
     // (The exact range behavior can be None or pointing to frontmatter start)
 }
+
+// ============================================================================
+// Glossary Term Hover Preview Tests (Chunk 11)
+// ============================================================================
+
+#[test]
+fn test_glossary_term_preview_shows_definition() {
+    let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+    let content = r#"```{glossary}
+MyST
+  Markedly Structured Text. A powerful Markdown variant.
+
+LSP
+  Language Server Protocol for IDE features.
+```
+"#;
+    fs::write(vault_dir.join("glossary.md"), content).unwrap();
+
+    let settings = Settings::default();
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+    // Find GlossaryTerm referenceables
+    let terms: Vec<_> = vault
+        .select_referenceable_nodes(None)
+        .into_iter()
+        .filter(|r| matches!(r, Referenceable::GlossaryTerm(..)))
+        .collect();
+
+    assert_eq!(terms.len(), 2, "Should find 2 glossary terms");
+
+    // Get the preview for MyST term
+    let myst_term = terms
+        .iter()
+        .find(|r| {
+            if let Referenceable::GlossaryTerm(_, term) = r {
+                term.term == "MyST"
+            } else {
+                false
+            }
+        })
+        .expect("Should find MyST term");
+
+    let preview = vault.select_referenceable_preview(myst_term);
+    assert!(preview.is_some(), "Preview should exist for glossary term");
+
+    match preview {
+        Some(crate::vault::Preview::Text(text)) => {
+            assert!(
+                text.contains("**MyST**"),
+                "Preview should contain bolded term name"
+            );
+            assert!(
+                text.contains("Markedly Structured Text"),
+                "Preview should contain definition: got '{}'",
+                text
+            );
+        }
+        Some(crate::vault::Preview::Empty) => {
+            panic!("Expected Preview::Text, got Preview::Empty");
+        }
+        None => {
+            panic!("Expected Preview::Text, got None");
+        }
+    }
+}
+
+#[test]
+fn test_term_role_resolves_to_glossary_term() {
+    let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+    // Glossary file with definitions
+    let glossary = r#"```{glossary}
+API
+  Application Programming Interface.
+```
+"#;
+    fs::write(vault_dir.join("glossary.md"), glossary).unwrap();
+
+    // File using {term} role
+    let usage = "# Using Terms\n\nSee the {term}`API` for details.";
+    fs::write(vault_dir.join("usage.md"), usage).unwrap();
+
+    let settings = Settings::default();
+    let vault = Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+    // Find the {term}`API` reference
+    let refs = vault.select_references(None);
+    let term_ref = refs
+        .iter()
+        .find(|(_, r)| {
+            matches!(
+                r,
+                Reference::MystRole(_, crate::vault::MystRoleKind::Term, _)
+            )
+        })
+        .expect("Should find term role reference");
+
+    // Resolve the reference
+    let resolved = vault.select_referenceables_for_reference(term_ref.1, term_ref.0);
+
+    assert_eq!(
+        resolved.len(),
+        1,
+        "Term role should resolve to exactly one glossary term"
+    );
+    assert!(
+        matches!(resolved[0], Referenceable::GlossaryTerm(..)),
+        "Should resolve to GlossaryTerm"
+    );
+}

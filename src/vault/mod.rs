@@ -411,6 +411,16 @@ impl Vault {
             .collect()
     }
 
+    /// Select glossary terms from `{glossary}` directives in a file or vault.
+    ///
+    /// Returns terms with their file path for document symbol and completion support.
+    pub fn select_glossary_terms<'a>(
+        &'a self,
+        path: Option<&'a Path>,
+    ) -> Vec<(&'a Path, &'a GlossaryTerm)> {
+        self.select_field(path, |md| &md.glossary_terms)
+    }
+
     pub fn select_referenceable_at_position<'a>(
         &'a self,
         path: &'a Path,
@@ -1227,11 +1237,9 @@ impl Vault {
                     .map(String::from_iter)
                     .map(Into::into)
             }
-            Referenceable::GlossaryTerm(path, term) => {
-                // Show the term name and definition preview
-                self.select_line(path, term.range.start.line as isize)
-                    .map(String::from_iter)
-                    .map(Into::into)
+            Referenceable::GlossaryTerm(_path, term) => {
+                // Show the term name and its full definition
+                Some(format!("**{}**\n\n{}", term.term, term.definition).into())
             }
             Referenceable::MathLabel(path, symbol) => {
                 // Show the line where the math directive is defined
