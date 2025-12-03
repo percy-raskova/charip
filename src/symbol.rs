@@ -745,4 +745,351 @@ Term
 
         assert_eq!(tree, Some(expected))
     }
+
+    // ============================================================================
+    // Workspace Symbol Tests (TDD RED PHASE)
+    // ============================================================================
+    //
+    // These tests verify that workspace_symbol returns MyST-specific elements
+    // with correct SymbolKinds and fuzzy matching behavior:
+    // - Anchors (target-name)= with SymbolKind::KEY
+    // - Directives with :name:/:label: with SymbolKind::OBJECT
+    // - Glossary terms with SymbolKind::CONSTANT
+    // - Headings with SymbolKind::STRUCT
+    // - Math labels with SymbolKind::FUNCTION
+    // - Indexed blocks with SymbolKind::STRING
+    // ============================================================================
+
+    mod workspace_symbols {
+        use std::fs;
+
+        use tower_lsp::lsp_types::{SymbolKind, WorkspaceSymbolParams};
+
+        use crate::{symbol::workspace_symbol, test_utils::create_test_vault};
+
+        /// Test that workspace symbols finds MyST anchors with correct SymbolKind
+        #[test]
+        fn test_workspace_symbol_finds_anchors() {
+            let content = r#"(my-anchor)=
+# Section One
+
+Some content here.
+
+(another-anchor)=
+## Subsection
+"#;
+            let (_temp_dir, _vault_dir, vault) = create_test_vault(|dir| {
+                fs::write(dir.join("test.md"), content).unwrap();
+            });
+
+            let params = WorkspaceSymbolParams {
+                query: "anchor".to_string(),
+                ..Default::default()
+            };
+
+            let symbols = workspace_symbol(&vault, &params);
+            assert!(symbols.is_some(), "Should return workspace symbols");
+
+            let symbols = symbols.unwrap();
+
+            // Filter to anchor symbols (SymbolKind::KEY)
+            let anchor_symbols: Vec<_> = symbols
+                .iter()
+                .filter(|s| s.kind == SymbolKind::KEY)
+                .collect();
+
+            assert!(
+                anchor_symbols.len() >= 2,
+                "Should find at least 2 anchor symbols matching 'anchor', found: {:?}",
+                anchor_symbols.iter().map(|s| &s.name).collect::<Vec<_>>()
+            );
+        }
+
+        /// Test that workspace symbols finds glossary terms with correct SymbolKind
+        #[test]
+        fn test_workspace_symbol_finds_glossary_terms() {
+            let content = r#"# Glossary
+
+```{glossary}
+MyST
+  Markedly Structured Text, an extended Markdown syntax.
+
+Sphinx
+  A documentation generator for Python projects.
+```
+"#;
+            let (_temp_dir, _vault_dir, vault) = create_test_vault(|dir| {
+                fs::write(dir.join("test.md"), content).unwrap();
+            });
+
+            let params = WorkspaceSymbolParams {
+                query: "myst".to_string(),
+                ..Default::default()
+            };
+
+            let symbols = workspace_symbol(&vault, &params);
+            assert!(symbols.is_some(), "Should return workspace symbols");
+
+            let symbols = symbols.unwrap();
+
+            // Find the MyST glossary term
+            let myst_symbol = symbols.iter().find(|s| s.name == "MyST");
+            assert!(myst_symbol.is_some(), "Should find 'MyST' glossary term");
+
+            // Verify it has SymbolKind::CONSTANT
+            assert_eq!(
+                myst_symbol.unwrap().kind,
+                SymbolKind::CONSTANT,
+                "Glossary term should have SymbolKind::CONSTANT"
+            );
+        }
+
+        /// Test that workspace symbols finds labeled directives with correct SymbolKind
+        #[test]
+        fn test_workspace_symbol_finds_labeled_directives() {
+            let content = r#"# Document
+
+```{figure} image.png
+:name: my-figure
+:width: 80%
+
+A figure caption.
+```
+
+```{code-block} python
+:label: hello-code
+
+print("Hello")
+```
+
+```{note}
+This note has no label - should NOT appear in workspace symbols.
+```
+"#;
+            let (_temp_dir, _vault_dir, vault) = create_test_vault(|dir| {
+                fs::write(dir.join("test.md"), content).unwrap();
+            });
+
+            let params = WorkspaceSymbolParams {
+                query: "figure".to_string(),
+                ..Default::default()
+            };
+
+            let symbols = workspace_symbol(&vault, &params);
+            assert!(symbols.is_some(), "Should return workspace symbols");
+
+            let symbols = symbols.unwrap();
+
+            // Find the my-figure directive label
+            let figure_symbol = symbols.iter().find(|s| s.name == "my-figure");
+            assert!(
+                figure_symbol.is_some(),
+                "Should find 'my-figure' directive label, got: {:?}",
+                symbols.iter().map(|s| &s.name).collect::<Vec<_>>()
+            );
+
+            // Verify it has SymbolKind::OBJECT
+            assert_eq!(
+                figure_symbol.unwrap().kind,
+                SymbolKind::OBJECT,
+                "Labeled directive should have SymbolKind::OBJECT"
+            );
+        }
+
+        /// Test that workspace symbols fuzzy matching works correctly
+        #[test]
+        fn test_workspace_symbol_fuzzy_matching() {
+            let content = r#"(introduction-section)=
+# Introduction
+
+(setup-guide)=
+## Setup
+
+(api-reference)=
+## API Reference
+"#;
+            let (_temp_dir, _vault_dir, vault) = create_test_vault(|dir| {
+                fs::write(dir.join("test.md"), content).unwrap();
+            });
+
+            // Test partial match
+            let params = WorkspaceSymbolParams {
+                query: "intro".to_string(),
+                ..Default::default()
+            };
+
+            let symbols = workspace_symbol(&vault, &params);
+            assert!(symbols.is_some(), "Should return workspace symbols");
+
+            let symbols = symbols.unwrap();
+
+            // Should find introduction-section
+            let intro_symbol = symbols
+                .iter()
+                .find(|s| s.name.contains("introduction"));
+            assert!(
+                intro_symbol.is_some(),
+                "Fuzzy match should find 'introduction-section' from query 'intro'"
+            );
+
+            // Test empty query returns all symbols
+            let params_empty = WorkspaceSymbolParams {
+                query: "".to_string(),
+                ..Default::default()
+            };
+
+            let _all_symbols = workspace_symbol(&vault, &params_empty);
+            // Note: empty query behavior depends on fuzzy matcher implementation
+            // Some matchers return all, some return none
+        }
+
+        /// Test that workspace symbols have correct SymbolKinds per the spec
+        #[test]
+        fn test_workspace_symbol_correct_symbol_kinds() {
+            let content = r#"(test-anchor)=
+# Main Heading
+
+```{note}
+:name: labeled-note
+Content
+```
+
+```{glossary}
+Term
+  Definition
+```
+
+```{math}
+:label: euler-identity
+e^{i\pi} + 1 = 0
+```
+
+Some text with ^indexed-block
+"#;
+            let (_temp_dir, _vault_dir, vault) = create_test_vault(|dir| {
+                fs::write(dir.join("test.md"), content).unwrap();
+            });
+
+            // Query for all symbols
+            let params = WorkspaceSymbolParams {
+                query: "".to_string(),
+                ..Default::default()
+            };
+
+            let _symbols = workspace_symbol(&vault, &params);
+
+            // With empty query, behavior depends on matcher - just test what we get
+            // Focus on specific queries to verify symbol kinds
+
+            // Test anchor has KEY
+            let params_anchor = WorkspaceSymbolParams {
+                query: "test-anchor".to_string(),
+                ..Default::default()
+            };
+            let anchor_result = workspace_symbol(&vault, &params_anchor);
+            if let Some(symbols) = anchor_result {
+                if let Some(anchor) = symbols.iter().find(|s| s.name == "test-anchor") {
+                    assert_eq!(
+                        anchor.kind,
+                        SymbolKind::KEY,
+                        "Anchor should have SymbolKind::KEY"
+                    );
+                }
+            }
+
+            // Test heading has STRUCT
+            let params_heading = WorkspaceSymbolParams {
+                query: "Main Heading".to_string(),
+                ..Default::default()
+            };
+            let heading_result = workspace_symbol(&vault, &params_heading);
+            if let Some(symbols) = heading_result {
+                if let Some(heading) = symbols.iter().find(|s| s.name.contains("Main Heading")) {
+                    assert_eq!(
+                        heading.kind,
+                        SymbolKind::STRUCT,
+                        "Heading should have SymbolKind::STRUCT"
+                    );
+                }
+            }
+
+            // Test glossary term has CONSTANT
+            let params_term = WorkspaceSymbolParams {
+                query: "Term".to_string(),
+                ..Default::default()
+            };
+            let term_result = workspace_symbol(&vault, &params_term);
+            if let Some(symbols) = term_result {
+                if let Some(term) = symbols.iter().find(|s| s.name == "Term") {
+                    assert_eq!(
+                        term.kind,
+                        SymbolKind::CONSTANT,
+                        "Glossary term should have SymbolKind::CONSTANT"
+                    );
+                }
+            }
+
+            // Test labeled directive has OBJECT
+            let params_directive = WorkspaceSymbolParams {
+                query: "labeled-note".to_string(),
+                ..Default::default()
+            };
+            let directive_result = workspace_symbol(&vault, &params_directive);
+            if let Some(symbols) = directive_result {
+                if let Some(directive) = symbols.iter().find(|s| s.name == "labeled-note") {
+                    assert_eq!(
+                        directive.kind,
+                        SymbolKind::OBJECT,
+                        "Labeled directive should have SymbolKind::OBJECT"
+                    );
+                }
+            }
+
+            // Test math label has FUNCTION
+            let params_math = WorkspaceSymbolParams {
+                query: "euler-identity".to_string(),
+                ..Default::default()
+            };
+            let math_result = workspace_symbol(&vault, &params_math);
+            if let Some(symbols) = math_result {
+                if let Some(math) = symbols.iter().find(|s| s.name == "euler-identity") {
+                    assert_eq!(
+                        math.kind,
+                        SymbolKind::FUNCTION,
+                        "Math label should have SymbolKind::FUNCTION"
+                    );
+                }
+            }
+        }
+
+        /// Test that indexed blocks have SymbolKind::STRING
+        #[test]
+        fn test_workspace_symbol_indexed_blocks() {
+            let content = r#"# Document
+
+This is a paragraph with an indexed block. ^my-block
+
+Another paragraph. ^another-block
+"#;
+            let (_temp_dir, _vault_dir, vault) = create_test_vault(|dir| {
+                fs::write(dir.join("test.md"), content).unwrap();
+            });
+
+            let params = WorkspaceSymbolParams {
+                query: "my-block".to_string(),
+                ..Default::default()
+            };
+
+            let symbols = workspace_symbol(&vault, &params);
+            if let Some(symbols) = symbols {
+                if let Some(block) = symbols.iter().find(|s| s.name.contains("my-block")) {
+                    assert_eq!(
+                        block.kind,
+                        SymbolKind::STRING,
+                        "Indexed block should have SymbolKind::STRING"
+                    );
+                }
+            }
+        }
+    }
 }

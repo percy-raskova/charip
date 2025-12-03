@@ -639,6 +639,7 @@ impl Vault {
             | Referenceable::GlossaryTerm(..)
             | Referenceable::MathLabel(..)
             | Referenceable::SubstitutionDef(..)
+            | Referenceable::DirectiveLabel(..)
             | Referenceable::Footnote(..)
             | Referenceable::LinkRefDef(..)
             | Referenceable::Tag(..)
@@ -819,8 +820,23 @@ impl Vault {
         Some(SymbolInformation {
             name: referenceable.get_refname(self.root_dir())?.to_string(),
             kind: match referenceable {
+                // Files
                 Referenceable::File(_, _) => SymbolKind::FILE,
+                // Headings: structural elements
+                Referenceable::Heading(_, _) => SymbolKind::STRUCT,
+                // Tags: constant-like labels
                 Referenceable::Tag(_, _) => SymbolKind::CONSTANT,
+                // MyST anchors: key targets for {ref} roles
+                Referenceable::MystAnchor(_, _) => SymbolKind::KEY,
+                // Glossary terms: constant-like definitions
+                Referenceable::GlossaryTerm(_, _) => SymbolKind::CONSTANT,
+                // Directive labels: object-like containers with names
+                Referenceable::DirectiveLabel(_, _) => SymbolKind::OBJECT,
+                // Math labels: function-like equations
+                Referenceable::MathLabel(_, _) => SymbolKind::FUNCTION,
+                // Indexed blocks: string-like block references
+                Referenceable::IndexedBlock(_, _) => SymbolKind::STRING,
+                // Footnotes, link refs, substitutions, unresolved: key-like
                 _ => SymbolKind::KEY,
             },
             location: Location {
@@ -1250,6 +1266,12 @@ impl Vault {
             Referenceable::SubstitutionDef(_, sub_def) => {
                 // Show the substitution name and value
                 Some(format!("{}: {}", sub_def.name, sub_def.value).into())
+            }
+            Referenceable::DirectiveLabel(path, symbol) => {
+                // Show the line where the directive is defined
+                self.select_line(path, symbol.line as isize)
+                    .map(String::from_iter)
+                    .map(Into::into)
             }
         }
     }
@@ -1966,6 +1988,24 @@ impl Reference {
                 MystRole(..) => false,
                 ImageLink(_) => false,
             },
+            // DirectiveLabel: :name: or :label: option in MyST directives
+            // Referenced via {ref}` `, {numref}` `, etc.
+            Referenceable::DirectiveLabel(_, symbol) => match self {
+                MystRole(_, MystRoleKind::Ref, target)
+                | MystRole(_, MystRoleKind::NumRef, target) => symbol
+                    .label
+                    .as_ref()
+                    .is_some_and(|label| target.to_lowercase() == label.to_lowercase()),
+                Tag(_) => false,
+                MDFileLink(_) => false,
+                MDHeadingLink(_, _, _) => false,
+                MDIndexedBlockLink(_, _, _) => false,
+                Footnote(_) => false,
+                LinkRef(_) => false,
+                MystRole(..) => false, // Other role types don't reference directive labels
+                ImageLink(_) => false,
+                Substitution(_) => false, // Substitutions don't reference directive labels
+            },
         }
     }
 }
@@ -2134,6 +2174,9 @@ pub enum Referenceable<'a> {
     /// Substitution definition from frontmatter: {{variable}}
     /// **File-local**: substitutions only resolve within the same file
     SubstitutionDef(&'a PathBuf, &'a MDSubstitutionDef),
+    /// Directive label: `:name:` or `:label:` option in MyST directives
+    /// Referenced via `{ref}`, `{numref}`, etc.
+    DirectiveLabel(&'a PathBuf, &'a MystSymbol),
 }
 impl Referenceable<'_> {
     /// Gets the generic reference name for a referenceable. This will not include any display text. If trying to determine if text is a reference of a particular referenceable, use the `is_reference` function
@@ -2225,6 +2268,14 @@ impl Referenceable<'_> {
                 infile_ref: Some(sub_def.name.clone()),
                 path: None,
             }),
+            Referenceable::DirectiveLabel(_, symbol) => {
+                // DirectiveLabel uses the label field from the MystSymbol
+                symbol.label.as_ref().map(|label| Refname {
+                    full_refname: label.clone(),
+                    infile_ref: Some(label.clone()),
+                    path: None,
+                })
+            }
         }
     }
 
@@ -2299,6 +2350,7 @@ impl Referenceable<'_> {
             Referenceable::GlossaryTerm(path, ..) => path,
             Referenceable::MathLabel(path, ..) => path,
             Referenceable::SubstitutionDef(path, ..) => path,
+            Referenceable::DirectiveLabel(path, ..) => path,
         }
     }
 
@@ -2318,6 +2370,7 @@ impl Referenceable<'_> {
             Referenceable::MathLabel(_, symbol) => Some(symbol.range),
             // SubstitutionDef is defined in frontmatter - no specific range
             Referenceable::SubstitutionDef(_, _) => None,
+            Referenceable::DirectiveLabel(_, symbol) => Some(symbol.range),
         }
     }
 
@@ -2350,6 +2403,7 @@ impl Referenceable<'_> {
             Referenceable::GlossaryTerm(..) => "glossary_term",
             Referenceable::MathLabel(..) => "math_label",
             Referenceable::SubstitutionDef(..) => "substitution_def",
+            Referenceable::DirectiveLabel(..) => "directive_label",
         }
     }
 

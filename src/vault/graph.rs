@@ -120,6 +120,7 @@ impl DocumentNode {
     /// - Glossary terms
     /// - Math labels
     /// - Substitution definitions
+    /// - Directive labels (directives with :name: or :label: options)
     pub fn get_referenceables(&self) -> Vec<Referenceable<'_>> {
         let DocumentNode {
             path: _,
@@ -181,6 +182,18 @@ impl DocumentNode {
                 substitution_defs
                     .iter()
                     .map(|sub_def| Referenceable::SubstitutionDef(&self.path, sub_def)),
+            )
+            .chain(
+                // Directive labels: directives with :name: or :label: option
+                // (excluding math directives which are handled separately as MathLabel)
+                myst_symbols
+                    .iter()
+                    .filter(|s| {
+                        s.kind == MystSymbolKind::Directive
+                            && s.label.is_some()
+                            && s.name != "math" // math labels are handled separately
+                    })
+                    .map(|directive| Referenceable::DirectiveLabel(&self.path, directive)),
             )
             .collect()
     }
