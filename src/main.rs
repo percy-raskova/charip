@@ -410,6 +410,11 @@ impl LanguageServer for Backend {
                         "next tuesday".into(),
                         "next wednesday".into(),
                         "next thursday".into(),
+                        // Vault analysis commands
+                        "charip.findOrphanDocuments".into(),
+                        "charip.transitiveDependencies".into(),
+                        "charip.transitiveDependents".into(),
+                        "charip.indexStats".into(),
                     ],
                     ..Default::default()
                 }),
@@ -635,6 +640,105 @@ impl LanguageServer for Backend {
                     .bind_vault(|vault| Ok(vault.root_dir().to_owned()))
                     .await?;
                 commands::jump(&self.client, &root_dir, &settings, jump_to).await
+            }
+            // charip.findOrphanDocuments - Find documents not reachable via toctree
+            ExecuteCommandParams { command, .. } if *command == *"charip.findOrphanDocuments" => {
+                let root_index_path = params
+                    .arguments
+                    .first()
+                    .and_then(|val| val.as_str())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| root_dir.join("index.md"));
+
+                let orphans = self
+                    .bind_vault(|vault| {
+                        let orphan_paths = vault.find_orphan_documents(&root_index_path);
+                        Ok(orphan_paths
+                            .into_iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect::<Vec<_>>())
+                    })
+                    .await?;
+
+                Ok(Some(serde_json::to_value(orphans).unwrap_or(Value::Null)))
+            }
+            // charip.transitiveDependencies - Get all files this document depends on
+            ExecuteCommandParams { command, .. }
+                if *command == *"charip.transitiveDependencies" =>
+            {
+                let file_path = params
+                    .arguments
+                    .first()
+                    .and_then(|val| val.as_str())
+                    .map(PathBuf::from);
+
+                let Some(path) = file_path else {
+                    return Err(Error::new(ErrorCode::InvalidParams));
+                };
+
+                let deps = self
+                    .bind_vault(|vault| {
+                        let dep_paths = vault.transitive_dependencies(&path);
+                        Ok(dep_paths
+                            .into_iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect::<Vec<_>>())
+                    })
+                    .await?;
+
+                Ok(Some(serde_json::to_value(deps).unwrap_or(Value::Null)))
+            }
+            // charip.transitiveDependents - Get all files that depend on this document
+            ExecuteCommandParams { command, .. } if *command == *"charip.transitiveDependents" => {
+                let file_path = params
+                    .arguments
+                    .first()
+                    .and_then(|val| val.as_str())
+                    .map(PathBuf::from);
+
+                let Some(path) = file_path else {
+                    return Err(Error::new(ErrorCode::InvalidParams));
+                };
+
+                let dependents = self
+                    .bind_vault(|vault| {
+                        let dep_paths = vault.transitive_dependents(&path);
+                        Ok(dep_paths
+                            .into_iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect::<Vec<_>>())
+                    })
+                    .await?;
+
+                Ok(Some(
+                    serde_json::to_value(dependents).unwrap_or(Value::Null),
+                ))
+            }
+            // charip.indexStats - Get vault statistics
+            ExecuteCommandParams { command, .. } if *command == *"charip.indexStats" => {
+                let stats = self
+                    .bind_vault(|vault| {
+                        let files = vault.document_count();
+                        let labels = vault.count_labels();
+                        let references = vault.count_references();
+
+                        // For orphans, use index.md as root if it exists
+                        let root_index = vault.root_dir().join("index.md");
+                        let orphans = vault.find_orphan_documents(&root_index).len();
+
+                        let broken_refs = vault.count_broken_references();
+
+                        Ok(serde_json::json!({
+                            "files": files,
+                            "labels": labels,
+                            "references": references,
+                            "orphans": orphans,
+                            "brokenRefs": broken_refs
+                        }))
+                    })
+                    .await?;
+
+                Ok(Some(stats))
             }
             ExecuteCommandParams { command, .. } => {
                 jump_to_specific(&command, &self.client, &root_dir, &settings).await

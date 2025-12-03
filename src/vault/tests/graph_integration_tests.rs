@@ -902,3 +902,186 @@ fn test_transitive_nonexistent_file() {
     let dependents = vault.transitive_dependents(&vault_dir.join("nonexistent.md"));
     assert!(dependents.is_empty());
 }
+
+// ============================================================================
+// Chunk 5.1: Index Stats Tests (for charip.indexStats command)
+// ============================================================================
+
+#[test]
+fn test_count_labels_empty_vault() {
+    let (_temp, vault_dir) = create_test_vault_dir();
+
+    fs::write(vault_dir.join("empty.md"), "").unwrap();
+
+    let vault = Vault::construct_vault(&Settings::default(), &vault_dir).unwrap();
+    let count = vault.count_labels();
+
+    // Empty file has no labels (headings, anchors, indexed blocks)
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn test_count_labels_with_headings() {
+    let (_temp, vault_dir) = create_test_vault_dir();
+
+    fs::write(
+        vault_dir.join("doc.md"),
+        "# Heading 1\n\n## Heading 2\n\n### Heading 3",
+    )
+    .unwrap();
+
+    let vault = Vault::construct_vault(&Settings::default(), &vault_dir).unwrap();
+    let count = vault.count_labels();
+
+    // Should count 3 headings as labels
+    assert_eq!(count, 3);
+}
+
+#[test]
+fn test_count_labels_with_myst_anchors() {
+    let (_temp, vault_dir) = create_test_vault_dir();
+
+    // MyST anchors require proper paragraph separation
+    // The anchor must be on its own line, typically before a heading
+    fs::write(
+        vault_dir.join("doc.md"),
+        "(anchor-one)=\n# Section One\n\n(anchor-two)=\n# Section Two",
+    )
+    .unwrap();
+
+    let vault = Vault::construct_vault(&Settings::default(), &vault_dir).unwrap();
+    let count = vault.count_labels();
+
+    // Should count 2 anchors + 2 headings = 4 labels
+    assert_eq!(count, 4);
+}
+
+#[test]
+fn test_count_labels_combined() {
+    let (_temp, vault_dir) = create_test_vault_dir();
+
+    // Combine headings, anchors, and indexed blocks
+    fs::write(
+        vault_dir.join("doc.md"),
+        "# Heading One\n\nSome text ^block1\n\n(anchor-one)=\n## Heading Two",
+    )
+    .unwrap();
+
+    let vault = Vault::construct_vault(&Settings::default(), &vault_dir).unwrap();
+    let count = vault.count_labels();
+
+    // Should count 2 headings + 1 anchor + 1 indexed block = 4 labels
+    assert_eq!(count, 4);
+}
+
+#[test]
+fn test_count_labels_with_indexed_blocks() {
+    let (_temp, vault_dir) = create_test_vault_dir();
+
+    fs::write(
+        vault_dir.join("doc.md"),
+        "# Title\n\nThis is a block ^block1\n\nAnother block ^block2",
+    )
+    .unwrap();
+
+    let vault = Vault::construct_vault(&Settings::default(), &vault_dir).unwrap();
+    let count = vault.count_labels();
+
+    // Should count 1 heading + 2 indexed blocks = 3 labels
+    assert_eq!(count, 3);
+}
+
+#[test]
+fn test_count_references_empty_vault() {
+    let (_temp, vault_dir) = create_test_vault_dir();
+
+    fs::write(vault_dir.join("empty.md"), "# Just a heading").unwrap();
+
+    let vault = Vault::construct_vault(&Settings::default(), &vault_dir).unwrap();
+    let count = vault.count_references();
+
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn test_count_references_with_links() {
+    let (_temp, vault_dir) = create_test_vault_dir();
+
+    fs::write(
+        vault_dir.join("source.md"),
+        "[link1](target1.md)\n[link2](target2.md)\n[link3](target3.md)",
+    )
+    .unwrap();
+    fs::write(vault_dir.join("target1.md"), "# Target 1").unwrap();
+    fs::write(vault_dir.join("target2.md"), "# Target 2").unwrap();
+    fs::write(vault_dir.join("target3.md"), "# Target 3").unwrap();
+
+    let vault = Vault::construct_vault(&Settings::default(), &vault_dir).unwrap();
+    let count = vault.count_references();
+
+    // Should count 3 links
+    assert_eq!(count, 3);
+}
+
+#[test]
+fn test_count_references_across_files() {
+    let (_temp, vault_dir) = create_test_vault_dir();
+
+    fs::write(vault_dir.join("a.md"), "[link](b.md)").unwrap();
+    fs::write(vault_dir.join("b.md"), "[link](c.md)").unwrap();
+    fs::write(vault_dir.join("c.md"), "# C").unwrap();
+
+    let vault = Vault::construct_vault(&Settings::default(), &vault_dir).unwrap();
+    let count = vault.count_references();
+
+    // 2 references total across files
+    assert_eq!(count, 2);
+}
+
+#[test]
+fn test_count_broken_references_none() {
+    let (_temp, vault_dir) = create_test_vault_dir();
+
+    fs::write(vault_dir.join("source.md"), "[link](target.md)").unwrap();
+    fs::write(vault_dir.join("target.md"), "# Target").unwrap();
+
+    let vault = Vault::construct_vault(&Settings::default(), &vault_dir).unwrap();
+    let count = vault.count_broken_references();
+
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn test_count_broken_references_with_broken_links() {
+    let (_temp, vault_dir) = create_test_vault_dir();
+
+    fs::write(
+        vault_dir.join("source.md"),
+        "[link1](nonexistent.md)\n[link2](also-missing.md)",
+    )
+    .unwrap();
+
+    let vault = Vault::construct_vault(&Settings::default(), &vault_dir).unwrap();
+    let count = vault.count_broken_references();
+
+    // 2 broken references
+    assert_eq!(count, 2);
+}
+
+#[test]
+fn test_count_broken_references_mixed() {
+    let (_temp, vault_dir) = create_test_vault_dir();
+
+    fs::write(
+        vault_dir.join("source.md"),
+        "[good](target.md)\n[broken](nonexistent.md)",
+    )
+    .unwrap();
+    fs::write(vault_dir.join("target.md"), "# Target").unwrap();
+
+    let vault = Vault::construct_vault(&Settings::default(), &vault_dir).unwrap();
+    let count = vault.count_broken_references();
+
+    // Only 1 broken reference
+    assert_eq!(count, 1);
+}

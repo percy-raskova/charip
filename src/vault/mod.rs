@@ -1038,6 +1038,124 @@ impl Vault {
 
         dependents
     }
+
+    /// Count all labels (linkable targets) in the vault.
+    ///
+    /// Labels are things that can be referenced/linked to:
+    /// - Headings (# Title, ## Section)
+    /// - MyST anchors ((target-name)=)
+    /// - Indexed blocks (^block-id)
+    /// - Directive labels (:name: option in MyST directives)
+    ///
+    /// Note: Files themselves are not counted as labels since they're
+    /// referenced by path, not by label.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let vault = Vault::construct_vault(&settings, &root_dir)?;
+    /// println!("Vault has {} linkable labels", vault.count_labels());
+    /// ```
+    pub fn count_labels(&self) -> usize {
+        use crate::myst_parser::MystSymbolKind;
+
+        self.documents()
+            .map(|(_, doc)| {
+                // Count headings
+                let headings = doc.headings.len();
+
+                // Count indexed blocks
+                let indexed_blocks = doc.indexed_blocks.len();
+
+                // Count MyST anchors
+                let anchors = doc
+                    .myst_symbols
+                    .iter()
+                    .filter(|s| s.kind == MystSymbolKind::Anchor)
+                    .count();
+
+                // Count directive labels (directives with :name: option)
+                let directive_labels = doc
+                    .myst_symbols
+                    .iter()
+                    .filter(|s| s.kind == MystSymbolKind::Directive && s.label.is_some())
+                    .count();
+
+                headings + indexed_blocks + anchors + directive_labels
+            })
+            .sum()
+    }
+
+    /// Count all references (outgoing links) in the vault.
+    ///
+    /// This counts all references across all documents, including:
+    /// - Markdown links (`[text](path)`)
+    /// - Heading links (`[text](path#heading)`)
+    /// - Indexed block links (`[text](path#^block)`)
+    /// - MyST roles (`{ref}\`target\``)
+    /// - Footnote references (`[^1]`)
+    /// - Tags (`#tag`)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let vault = Vault::construct_vault(&settings, &root_dir)?;
+    /// println!("Vault has {} references", vault.count_references());
+    /// ```
+    pub fn count_references(&self) -> usize {
+        self.select_references(None).len()
+    }
+
+    /// Count broken (unresolved) references in the vault.
+    ///
+    /// A broken reference is one that points to a target that doesn't exist:
+    /// - Links to non-existent files
+    /// - Links to non-existent headings
+    /// - Links to non-existent indexed blocks
+    /// - MyST roles pointing to non-existent anchors
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let vault = Vault::construct_vault(&settings, &root_dir)?;
+    /// let broken = vault.count_broken_references();
+    /// if broken > 0 {
+    ///     eprintln!("Warning: {} broken references found", broken);
+    /// }
+    /// ```
+    pub fn count_broken_references(&self) -> usize {
+        let referenceables = self.select_referenceable_nodes(None);
+        let all_references = self.select_references(None);
+
+        all_references
+            .iter()
+            .filter(|(path, reference)| {
+                let matched = referenceables.iter().find(|referenceable| {
+                    reference.references(self.root_dir(), path, referenceable)
+                });
+
+                // Check if matched to an Unresolved* variant
+                let is_unresolved_md_link = matched.is_some_and(|m| {
+                    matches!(
+                        m,
+                        Referenceable::UnresolvedIndexedBlock(..)
+                            | Referenceable::UnresolvedFile(..)
+                            | Referenceable::UnresolvedHeading(..)
+                    )
+                });
+
+                // MyST roles that match nothing are broken
+                let is_unresolved_myst_role =
+                    matches!(reference, Reference::MystRole(..)) && matched.is_none();
+
+                // Substitutions that match nothing are broken
+                let is_unresolved_substitution =
+                    matches!(reference, Reference::Substitution(..)) && matched.is_none();
+
+                is_unresolved_md_link || is_unresolved_myst_role || is_unresolved_substitution
+            })
+            .count()
+    }
 }
 
 pub enum Preview {
