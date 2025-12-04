@@ -1,0 +1,101 @@
+# Deferred work and future enhancements
+# Prioritized by impact and effort
+
+high_priority:
+  frontmatter_validation:
+    description: validate frontmatter against JSON schema
+    schema: ~/rstnotes/_schemas/frontmatter.schema.json
+    features:
+      - diagnostic for invalid fields
+      - completion for field names
+      - completion for enum values (status, category)
+    effort: medium
+    files:
+      - src/vault/metadata.rs
+      - src/diagnostics.rs
+
+  glossary_completion:
+    description: complete {term} from glossary directive content
+    requires: parse glossary directive body for term definitions
+    effort: medium
+
+medium_priority:
+  figure_path_completion:
+    description: complete image paths in figure directives
+    notes: "{assets}" substitution points to external URL
+    effort: low
+
+  substitution_resolution:
+    description: resolve {{var}} in hover previews
+    source: conf.py myst_substitutions
+    effort: medium
+
+  cycle_detection:
+    description: detect circular includes
+    requires: petgraph integration
+    effort: high
+
+low_priority:
+  func_role:
+    description: "{func}" role completion
+    usage: 3 instances in rstnotes
+    effort: low
+
+  custom_directive_snippets:
+    description: scaffolds for definition, ai-chat, ai-exchange
+    effort: low
+
+deferred_refactorings:
+  api_consistency:
+    issue: select_references returns Option<Vec>, select_myst_symbols returns Vec
+    recommendation: unify to Vec (empty = no results)
+    priority: medium
+    effort: low
+
+  test_helper_extraction:
+    issue: create_test_vault_dir duplicated in tests
+    recommendation: extract to shared test utilities module
+    priority: low
+
+  generic_select_abstraction:
+    issue: select_references and select_myst_symbols have identical patterns
+    recommendation: defer until "rule of three" met
+    priority: low
+
+not_planned:
+  # Enabled in conf.py but unused in practice
+  - colon fence ":::" syntax (0 uses)
+  - definition lists
+  - task lists
+  - inline attributes
+  - "{numref}" role
+  - "{eq}" role
+
+future_architecture:
+  graph_based_vault:
+    description: replace HashMap with petgraph MultiDiGraph
+    status: not started
+    benefits:
+      - O(1) backlinks (vs O(N) scan)
+      - cycle detection for includes
+      - toctree relationship modeling
+    structs:
+      DocumentNode:
+        - uri: String
+        - title: String
+        - is_root: bool
+        - has_targets: Vec<String>
+      EdgeKind:
+        - Reference
+        - Structure { caption }
+        - Transclusion { range }
+    effort: high (major refactor)
+
+  actor_model:
+    description: background indexer thread
+    current: RwLock blocks reads during writes
+    proposed: channel-based async indexer
+    benefits:
+      - non-blocking completions during reindex
+      - better large vault performance
+    effort: high

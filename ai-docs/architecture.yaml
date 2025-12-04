@@ -1,0 +1,128 @@
+# charip-lsp architecture reference
+# Core data structures and module map
+
+entry_point:
+  file: src/main.rs
+  struct: Backend
+  fields:
+    client: tower_lsp::Client
+    vault: Arc<RwLock<Option<Vault>>>
+    settings: Arc<RwLock<Option<Settings>>>
+    opened_files: Arc<RwLock<HashSet<PathBuf>>>
+
+core_structs:
+  Vault:
+    file: src/vault/mod.rs
+    purpose: in-memory knowledge graph
+    fields:
+      md_files: HashMap<PathBuf, MDFile>
+      ropes: HashMap<PathBuf, Rope>
+      root_dir: PathBuf
+    key_methods:
+      - select_references(path)           # outgoing links from file
+      - select_referenceable_nodes(path)  # targets in file
+      - select_references_for_referenceable(target)  # backlinks
+      - select_myst_symbols(path)         # MyST directives/anchors
+
+  MDFile:
+    file: src/vault/mod.rs
+    purpose: parsed representation of single .md file
+    fields:
+      - references: Vec<Reference>
+      - headings: Vec<MDHeading>
+      - indexed_blocks: Vec<MDIndexedBlock>
+      - tags: Vec<MDTag>
+      - footnotes: Vec<MDFootnote>
+      - link_reference_definitions: Vec<MDLinkReferenceDefinition>
+      - metadata: Option<MDMetadata>
+      - codeblocks: Vec<MDCodeBlock>
+      - myst_symbols: Vec<MystSymbol>
+      - path: PathBuf
+
+  Reference:
+    file: src/vault/mod.rs
+    purpose: outgoing link (edge source)
+    variants:
+      - Tag(ReferenceData)
+      - MDFileLink(ReferenceData)
+      - MDHeadingLink(ReferenceData, File, Specialref)
+      - MDIndexedBlockLink(ReferenceData, File, Specialref)
+      - Footnote(ReferenceData)
+      - LinkRef(ReferenceData)
+    # WikiLink variants removed (MyST uses standard MD links)
+
+  Referenceable:
+    file: src/vault/mod.rs
+    purpose: link target (can be referenced)
+    variants:
+      - File(&PathBuf, &MDFile)
+      - Heading(&PathBuf, &MDHeading)
+      - IndexedBlock(&PathBuf, &MDIndexedBlock)
+      - Tag(&PathBuf, &MDTag)
+      - Footnote(&PathBuf, &MDFootnote)
+      - LinkRefDef(&PathBuf, &MDLinkReferenceDefinition)
+      - UnresolvedFile(PathBuf, &String)
+      - UnresolvedHeading(PathBuf, &String, &String)
+      - UnresolvedIndexedBlock(PathBuf, &String, &String)
+
+  MystSymbol:
+    file: src/myst_parser.rs
+    purpose: MyST-specific constructs
+    fields:
+      - kind: MystSymbolKind
+      - name: String
+      - range: MyRange
+      - label: Option<String>  # :name: option for directives
+    kinds:
+      - Directive  # ```{name} or :::{name}
+      - Anchor     # (target)=
+      - Reference  # placeholder for {role}`target`
+
+modules:
+  vault:
+    path: src/vault/
+    files:
+      mod.rs: main vault logic, Reference/Referenceable enums
+      ast_refs.rs: AST-based reference extraction
+      types.rs: MyRange, MDHeading, MDTag, etc.
+      helpers.rs: path resolution utilities
+      metadata.rs: frontmatter parsing
+      parsing.rs: code block parsing
+
+  completion:
+    path: src/completion/
+    files:
+      mod.rs: completion dispatcher
+      link_completer.rs: markdown link completion
+      tag_completer.rs: tag completion
+      footnote_completer.rs: footnote completion
+      callout_completer.rs: callout completion
+      myst_directive_completer.rs: "```{" directive completion
+      myst_role_completer.rs: "{ref}`" target completion
+      role_name_completer.rs: "{" role name completion
+      matcher.rs: fuzzy matching (nucleo)
+      util.rs: helpers (code block detection)
+
+  lsp_features:
+    gotodef.rs: go-to-definition
+    references.rs: find all references (backlinks)
+    rename.rs: rename symbols
+    diagnostics.rs: broken link detection
+    hover.rs: hover previews
+    codeactions.rs: create unresolved file, append heading
+    symbols.rs: document/workspace symbols
+
+  myst:
+    myst_parser.rs: directive/role/anchor extraction
+
+  config:
+    config.rs: settings loading
+    daily.rs: daily notes
+    cli.rs: CLI commands
+
+request_lifecycle:
+  1: client sends LSP request (e.g. textDocument/completion)
+  2: Backend handler acquires read lock on Vault
+  3: delegates to feature module (e.g. completion::get_completions)
+  4: module queries Vault for data
+  5: returns result to client

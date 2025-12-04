@@ -1,0 +1,66 @@
+# charip-lsp project context
+# Token-efficient reference for AI agents
+
+meta:
+  name: charip-lsp
+  origin: fork of markdown-oxide
+  purpose: LSP for MyST (Markedly Structured Text) documents
+  target_vault: ~/rstnotes (Sphinx/MyST knowledge base)
+
+build:
+  toolchain: rust nightly
+  commands:
+    build: cargo build --release
+    test: cargo test
+    format: cargo fmt
+    lint: cargo clippy
+  ci:
+    - cargo build --verbose --locked
+    - cargo test --verbose
+  binary: target/release/charip
+
+cli:
+  daily: cargo run --release -- daily   # open today's daily note
+  config: cargo run --release -- config # open config file
+
+target_environment:
+  build_system: Sphinx + myst-parser
+  myst_extensions:
+    - colon_fence
+    - deflist
+    - dollarmath
+    - substitution
+    - tasklist
+  custom_roles:
+    - "{term}" # glossary terms
+    - "{ref}"  # cross-references
+    - "{doc}"  # document links
+    - "{tag}"  # custom role
+  custom_directives:
+    - definition  # _extensions/definition.py
+    - honeypot    # _extensions/honeypot.py
+    - ai_content  # _extensions/ai_content.py
+
+patterns:
+  concurrency:
+    async: tokio
+    parallelism: rayon
+    sync: Arc<RwLock<T>>
+  parsing:
+    ast: markdown-rs (micromark)
+    text_rope: ropey
+    fuzzy_match: nucleo-matcher
+  testing: TDD (red-green-refactor)
+
+conventions:
+  commits: Juche-Conventional format (see CLAUDE.md)
+  new_code: prefer editing existing files
+  documentation: demand-driven, accuracy over comprehensiveness
+
+key_crates:
+  - tower-lsp  # LSP protocol
+  - markdown   # AST parsing (markdown-rs)
+  - ropey      # text manipulation
+  - rayon      # parallel iteration
+  - petgraph   # graph (planned, not yet used)
+  - nucleo-matcher  # fuzzy matching

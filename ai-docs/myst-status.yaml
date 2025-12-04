@@ -1,0 +1,110 @@
+# MyST implementation status
+# What's done, what's next
+
+completed:
+  phase1_role_extraction:
+    status: complete
+    description: MyST role extraction from text nodes
+    files:
+      - src/myst_parser.rs
+    features:
+      - regex detection of {role}`target` patterns
+      - MystSymbol struct with kind, name, range, label
+      - MystSymbolKind enum (Directive, Anchor, Reference)
+
+  phase2_anchor_resolution:
+    status: complete
+    description: go-to-definition from roles to anchors
+    files:
+      - src/gotodef.rs
+      - src/myst_parser.rs
+    features:
+      - (target)= anchor extraction
+      - {ref}`target` resolves to anchor location
+      - {doc}`path` resolves to file
+
+  phase2_5_directive_labels:
+    status: complete
+    description: ":name:" option parsing for directives
+    features:
+      - directives with :name: are referenceable
+      - go-to-definition for directive labels
+
+  phase3_directive_completion:
+    status: complete
+    description: "```{" triggers directive suggestions
+    files:
+      - src/completion/myst_directive_completer.rs
+    features:
+      - admonition directives (note, warning, tip, etc.)
+      - content directives (code-block, literalinclude)
+      - structure directives (toctree, contents)
+
+  phase4_role_target_completion:
+    status: complete
+    description: "{role}`" triggers target suggestions
+    files:
+      - src/completion/myst_role_completer.rs
+      - src/completion/role_name_completer.rs
+    features:
+      - "{ref}`" suggests anchors/headings
+      - "{doc}`" suggests document paths
+      - "{term}`" suggests glossary terms (via hover)
+      - "{" suggests role names (ref, doc, term, etc.)
+      - "/" prefix for vault-root-relative paths
+
+current_capabilities:
+  completion:
+    - markdown links [text](path)
+    - tags #tag
+    - footnotes [^note]
+    - callouts > [!type]
+    - MyST directives "```{"
+    - MyST role names "{"
+    - MyST role targets "{ref}`", "{doc}`", "{term}`"
+    - root-relative paths in {doc}
+
+  navigation:
+    - go-to-definition for links
+    - go-to-definition for MyST anchors
+    - go-to-definition for directive labels
+    - find all references (backlinks)
+    - document symbols (headings, anchors, directives)
+    - workspace symbols (vault-wide search)
+
+  diagnostics:
+    - broken link detection
+    - unresolved references
+
+  hover:
+    - link target preview
+    - "{term}`" glossary hover
+
+key_files:
+  - src/myst_parser.rs           # directive/role/anchor extraction
+  - src/completion/myst_directive_completer.rs  # directive completion
+  - src/completion/myst_role_completer.rs       # role target completion
+  - src/completion/role_name_completer.rs       # role name completion
+  - src/vault/ast_refs.rs        # AST-based reference extraction
+
+trigger_characters:
+  - "["   # markdown link
+  - "{"   # MyST role name
+  - " "   # various
+  - "("   # link target
+  - "#"   # heading/tag
+  - "^"   # footnote
+  - "`"   # code/role target
+
+usage_in_rstnotes:
+  high_priority:
+    - "{doc}": 50 uses
+    - admonitions: 37 uses
+    - "{ref}": 10 uses
+  medium_priority:
+    - figure directive: 9 uses
+    - "{term}": 7 uses
+    - frontmatter: 98 files
+  low_priority:
+    - "{func}": 3 uses
+    - custom directives: ~10 uses
