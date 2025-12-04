@@ -62,5 +62,5 @@ key_crates:
   - markdown   # AST parsing (markdown-rs)
   - ropey      # text manipulation
   - rayon      # parallel iteration
-  - petgraph   # graph (planned, not yet used)
+  - petgraph   # graph-based vault storage (VaultGraph)
   - nucleo-matcher  # fuzzy matching

@@ -32,8 +32,8 @@ medium_priority:
 
   cycle_detection:
     description: detect circular includes
-    requires: petgraph integration
-    effort: high
+    notes: petgraph is integrated; needs algorithm implementation
+    effort: medium
 
 low_priority:
   func_role:
@@ -46,12 +46,6 @@ low_priority:
     effort: low
 
 deferred_refactorings:
-  api_consistency:
-    issue: select_references returns Option<Vec>, select_myst_symbols returns Vec
-    recommendation: unify to Vec (empty = no results)
-    priority: medium
-    effort: low
-
   test_helper_extraction:
     issue: create_test_vault_dir duplicated in tests
     recommendation: extract to shared test utilities module
@@ -72,25 +66,6 @@ not_planned:
   - "{eq}" role
 
 future_architecture:
-  graph_based_vault:
-    description: replace HashMap with petgraph MultiDiGraph
-    status: not started
-    benefits:
-      - O(1) backlinks (vs O(N) scan)
-      - cycle detection for includes
-      - toctree relationship modeling
-    structs:
-      DocumentNode:
-        - uri: String
-        - title: String
-        - is_root: bool
-        - has_targets: Vec<String>
-      EdgeKind:
-        - Reference
-        - Structure { caption }
-        - Transclusion { range }
-    effort: high (major refactor)
-
   actor_model:
     description: background indexer thread
     current: RwLock blocks reads during writes
@@ -99,3 +74,22 @@ future_architecture:
       - non-blocking completions during reindex
       - better large vault performance
     effort: high
+
+recently_completed:
+  graph_based_vault:
+    description: replaced HashMap with petgraph DiGraph
+    status: complete
+    location: src/vault/graph.rs
+    structs:
+      - DocumentNode (graph nodes)
+      - EdgeKind (Reference, Structure, Transclusion)
+      - VaultGraph (DiGraph<DocumentNode, EdgeKind>)
+    benefits_realized:
+      - O(1) node lookup via node_index HashMap
+      - graph traversal for backlinks
+      - foundation for cycle detection
+
+  api_consistency:
+    description: unified select_* method return types
+    status: complete
+    note: all select methods now return Vec (empty = no results)

@@ -13,21 +13,23 @@ entry_point:
 core_structs:
   Vault:
     file: src/vault/mod.rs
-    purpose: in-memory knowledge graph
+    purpose: in-memory knowledge graph (petgraph-based)
     fields:
-      md_files: HashMap<PathBuf, MDFile>
-      ropes: HashMap<PathBuf, Rope>
+      ropes: MyHashMap<Rope>
       root_dir: PathBuf
+      graph: VaultGraph              # petgraph DiGraph<DocumentNode, EdgeKind>
+      node_index: HashMap<PathBuf, NodeIndex>  # O(1) path->node lookup
     key_methods:
       - select_references(path)           # outgoing links from file
       - select_referenceable_nodes(path)  # targets in file
       - select_references_for_referenceable(target)  # backlinks
       - select_myst_symbols(path)         # MyST directives/anchors
 
-  MDFile:
-    file: src/vault/mod.rs
-    purpose: parsed representation of single .md file
+  DocumentNode:
+    file: src/vault/graph.rs
+    purpose: graph node representing a single .md file
     fields:
+      - path: PathBuf
       - references: Vec<Reference>
       - headings: Vec<MDHeading>
       - indexed_blocks: Vec<MDIndexedBlock>
@@ -37,7 +39,8 @@ core_structs:
       - metadata: Option<MDMetadata>
       - codeblocks: Vec<MDCodeBlock>
       - myst_symbols: Vec<MystSymbol>
-      - path: PathBuf
+      - glossary_terms: Vec<GlossaryTerm>
+      - substitution_defs: Vec<SubstitutionDef>
 
   Reference:
     file: src/vault/mod.rs
@@ -49,13 +52,15 @@ core_structs:
       - MDIndexedBlockLink(ReferenceData, File, Specialref)
       - Footnote(ReferenceData)
       - LinkRef(ReferenceData)
-    # WikiLink variants removed (MyST uses standard MD links)
+      - MystRole(ReferenceData, MystRoleKind, String)  # {role}`target`
+      - ImageLink(ReferenceData)                       # ![alt](path)
+      - Substitution(ReferenceData)                    # {{variable}}
 
   Referenceable:
     file: src/vault/mod.rs
     purpose: link target (can be referenced)
     variants:
-      - File(&PathBuf, &MDFile)
+      - File(&PathBuf, &DocumentNode)
       - Heading(&PathBuf, &MDHeading)
       - IndexedBlock(&PathBuf, &MDIndexedBlock)
       - Tag(&PathBuf, &MDTag)
@@ -64,6 +69,11 @@ core_structs:
       - UnresolvedFile(PathBuf, &String)
       - UnresolvedHeading(PathBuf, &String, &String)
       - UnresolvedIndexedBlock(PathBuf, &String, &String)
+      - MystAnchor(&PathBuf, &MystSymbol)        # (target)=
+      - GlossaryTerm(&PathBuf, &GlossaryTerm)    # {term}`...`
+      - MathLabel(&PathBuf, &MystSymbol)         # {eq}`...`
+      - SubstitutionDef(&PathBuf, &SubstitutionDef)  # {{var}} definition
+      - DirectiveLabel(&PathBuf, &MystSymbol)    # :name: option
 
   MystSymbol:
     file: src/myst_parser.rs
@@ -71,6 +81,7 @@ core_structs:
     fields:
       - kind: MystSymbolKind
       - name: String
+      - line: usize
       - range: MyRange
       - label: Option<String>  # :name: option for directives
     kinds:
@@ -83,6 +94,7 @@ modules:
     path: src/vault/
     files:
       mod.rs: main vault logic, Reference/Referenceable enums
+      graph.rs: DocumentNode, EdgeKind, VaultGraph (petgraph)
       ast_refs.rs: AST-based reference extraction
       types.rs: MyRange, MDHeading, MDTag, etc.
       helpers.rs: path resolution utilities
@@ -110,7 +122,7 @@ modules:
     diagnostics.rs: broken link detection
     hover.rs: hover previews
     codeactions.rs: create unresolved file, append heading
-    symbols.rs: document/workspace symbols
+    symbol.rs: document/workspace symbols
 
   myst:
     myst_parser.rs: directive/role/anchor extraction

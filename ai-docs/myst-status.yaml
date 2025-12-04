@@ -90,11 +90,10 @@ key_files:
 trigger_characters:
   - "["   # markdown link
   - "{"   # MyST role name
-  - " "   # various
+  - " "   # various contexts
   - "("   # link target
   - "#"   # heading/tag
-  - "^"   # footnote
-  - "`"   # code/role target
+  - ">"   # callout
 
 usage_in_rstnotes:
   high_priority:
