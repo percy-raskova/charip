@@ -4,67 +4,105 @@ title: charip-lsp Documentation
 
 # charip-lsp
 
-A Language Server for MyST (Markedly Structured Text) documents.
+A Language Server Protocol implementation for [MyST](https://myst-parser.readthedocs.io/) (Markedly Structured Text) documentation projects.
 
-## About the Name
+## What is charip-lsp?
 
-**Charip** (자립, *ja-rip*) means "self-reliance" or "economic self-sufficiency" in Korean. It is one of the three pillars of the Juche idea, which holds that true independence requires building one's own infrastructure rather than depending on external systems.
+charip-lsp brings IDE-quality features to MyST documentation:
 
-This project embodies that principle: rather than adapting PKM tools built for Obsidian workflows, MyST documentation writers build their own infrastructure. Technical documentation deserves tooling that understands its specific needs—cross-references, glossaries, directives—without the ideological assumptions of note-taking systems designed for different purposes.
+- **Intelligent autocomplete** for directives, roles, cross-references, and glossary terms
+- **Go-to-definition** that understands `{ref}`, `{doc}`, `{term}`, and anchors
+- **Find references** to see everywhere a target is used
+- **Real-time diagnostics** for broken links, missing images, and circular includes
+- **Rename refactoring** that updates all references automatically
 
-## Project Status
+Built in Rust for performance, charip-lsp uses a graph-based architecture that scales to large documentation projects.
 
-```{admonition} Current Status
+```{admonition} Project Status
 :class: tip
 
-All core MyST features implemented with graph-based architecture:
-- Directive/role/anchor extraction
-- Go-to-definition and find references
-- Directive and role target autocomplete
-- Anchor rename from roles
-- Glossary term and equation completion
-- Broken reference and image diagnostics
-- Include cycle detection
-- Orphan document detection
-- Transitive dependency analysis
-
-**347 tests passing**
+**Production ready.** All core MyST features are implemented with 347 tests passing.
 ```
+
+## Quick Example
+
+```{code-block} markdown
+:caption: MyST with full LSP support
+
+(installation-guide)=
+# Installation Guide
+
+See the {ref}`configuration-options` section for details.
+
+For API documentation, check {doc}`/reference/api`.
+
+The {term}`Language Server Protocol` enables editor integration.
+```
+
+With charip-lsp, every reference in this example gets:
+- Autocomplete suggestions as you type
+- Click-to-navigate to the target
+- Rename support that updates all usages
+- Warnings if targets don't exist
 
 ## Documentation
 
 ```{toctree}
 :maxdepth: 2
-:caption: Architecture
+:caption: Getting Started
 
-architecture/overview
-architecture/data-model
-architecture/deep-dive
+getting-started/index
+getting-started/installation
+getting-started/editor-setup
 ```
 
 ```{toctree}
 :maxdepth: 2
-:caption: Development
+:caption: User Guide
 
-development/myst-implementation
-development/future-enhancements
-development/parser-analysis
-development/target-environment
+user-guide/index
+user-guide/autocomplete
+user-guide/navigation
+user-guide/cross-references
+user-guide/diagnostics
 ```
 
 ```{toctree}
 :maxdepth: 2
 :caption: Reference
 
+reference/index
 reference/capabilities
-reference/myst-spec
-reference/features
+reference/myst-syntax
 reference/configuration
-reference/testing
+reference/cli
 ```
 
-## Quick Links
+```{toctree}
+:maxdepth: 2
+:caption: Understanding charip-lsp
 
-- **Source**: [GitHub](https://github.com/user/charip-lsp)
-- **Upstream**: [markdown-oxide](https://github.com/Feel-ix-343/markdown-oxide)
-- **MyST Spec**: [MyST Documentation](https://myst-parser.readthedocs.io/)
+explanation/index
+explanation/architecture
+explanation/graph-model
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Contributing
+
+contributing/index
+contributing/development
+contributing/testing
+contributing/commit-philosophy
+```
+
+## About the Name
+
+**Charip** (자립, *ja-rip*) is the Korean word for "self-reliance." The name reflects the project's philosophy: rather than adapting tools designed for other workflows, technical documentation deserves purpose-built infrastructure that understands its specific needs.
+
+## Links
+
+- [Source Code](https://github.com/user/charip-lsp)
+- [MyST Parser Documentation](https://myst-parser.readthedocs.io/)
+- [Language Server Protocol Specification](https://microsoft.github.io/language-server-protocol/)
