@@ -1,47 +1,38 @@
+//! charip LSP server binary
+//!
+//! This is the main entry point for the charip language server.
+//! The core functionality is provided by the `charip` library crate.
+
 use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use completion::get_completions;
-use config::{EmbeddedBlockTransclusionLength, Settings};
-use diagnostics::diagnostics_with_schema;
-use frontmatter_schema::FrontmatterSchema;
 use itertools::Itertools;
 use rayon::prelude::*;
-use references::references;
 use serde_json::Value;
-use symbol::{document_symbol, workspace_symbol};
 use tokio::sync::RwLock;
-
-use gotodef::goto_definition;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
-
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use vault::{Preview, Rangeable, Reference, Vault};
 
-mod cli;
-mod codeactions;
-mod codelens;
-mod commands;
-mod completion;
-mod config;
-mod daily;
-mod diagnostics;
-mod frontmatter_schema;
-mod gotodef;
-mod hover;
-mod macros;
-mod myst_parser;
-mod references;
-mod rename;
-mod symbol;
-#[cfg(test)]
-mod test_utils;
-mod tokens;
-mod ui;
-mod vault;
+// Import from the charip library crate
+use charip::{params_path, params_position_path};
+use charip::cli;
+use charip::codeactions;
+use charip::codelens;
+use charip::commands;
+use charip::completion::get_completions;
+use charip::config::{EmbeddedBlockTransclusionLength, Settings};
+use charip::diagnostics::diagnostics_with_schema;
+use charip::frontmatter_schema::FrontmatterSchema;
+use charip::gotodef::goto_definition;
+use charip::hover;
+use charip::references::references;
+use charip::rename;
+use charip::symbol::{document_symbol, workspace_symbol};
+use charip::tokens;
+use charip::vault::{Preview, Rangeable, Reference, Vault};
 
 #[derive(Debug)]
 struct Backend {

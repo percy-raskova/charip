@@ -35,19 +35,40 @@ use super::types::{
 use super::{metadata::MDMetadata, parsing::MDCodeBlock, MDFile, Reference, Referenceable};
 use crate::myst_parser::{GlossaryTerm, MystSymbol, MystSymbolKind};
 
-/// Node data representing a single document in the vault graph.
+/// A parsed Markdown document stored as a graph node.
 ///
-/// This structure mirrors `MDFile` but is designed for graph storage.
-/// Each node contains all parsed content from a single Markdown file.
+/// `DocumentNode` represents a single `.md` file in the vault. It contains
+/// all extracted elements: headings, references, anchors, tags, and metadata.
+/// These nodes are stored in the vault's [`VaultGraph`] with edges representing
+/// inter-document relationships.
+///
+/// # Contents
+///
+/// A document node contains:
+///
+/// | Field | Description |
+/// |-------|-------------|
+/// | `references` | All outgoing links (also stored as graph edges) |
+/// | `headings` | Section headings for navigation |
+/// | `indexed_blocks` | Blocks marked with `^id` for direct linking |
+/// | `tags` | Hashtag categorization |
+/// | `myst_symbols` | MyST directives and anchors |
+/// | `glossary_terms` | Terms from `{glossary}` directives |
+///
+/// # Graph Storage
+///
+/// In the vault graph:
+/// - This struct is the **node weight** (`DiGraph<DocumentNode, EdgeKind>`)
+/// - References between files become **edges** for efficient backlink queries
+/// - Access via [`Vault::get_document()`](super::Vault::get_document)
 ///
 /// # Example
 ///
-/// ```ignore
-/// let node = DocumentNode {
-///     path: PathBuf::from("/vault/notes/topic.md"),
-///     headings: vec![...],
-///     ..Default::default()
-/// };
+/// ```rust,ignore
+/// let node = vault.get_document(&path).unwrap();
+/// for heading in &node.headings {
+///     println!("## {}", heading.heading_text);
+/// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DocumentNode {

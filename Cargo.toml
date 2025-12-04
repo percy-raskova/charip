@@ -5,6 +5,10 @@ edition = "2021"
 repository = "https://github.com/percy-raskova/charip"
 description = "A Language Server for MyST Markdown — Build Your Own Infrastructure"
 
+[lib]
+name = "charip"
+path = "src/lib.rs"
+
 [[bin]]
 name = "charip"
 path = "src/main.rs"

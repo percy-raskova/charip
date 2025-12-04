@@ -1,37 +1,122 @@
+//! MyST (Markedly Structured Text) syntax parsing.
+//!
+//! This module extracts MyST-specific constructs from Markdown documents:
+//! - Directives: `{directive}` code blocks with options
+//! - Anchors: `(target)=` explicit cross-reference targets
+//! - Roles: `{role}\`content\`` inline semantic markup
+//! - Glossary terms: Definitions within `{glossary}` directives
+//!
+//! # MyST Syntax Overview
+//!
+//! MyST extends CommonMark with Sphinx-compatible features:
+//!
+//! - **Anchors**: `(my-anchor)=` creates a referenceable target
+//! - **Directives**: Code blocks with `{directive}` language create admonitions, figures, etc.
+//! - **Roles**: `{ref}\`target\`` creates inline cross-references
+//!
+//! # Key Types
+//!
+//! - [`MystSymbol`]: Extracted directive or anchor
+//! - [`MystSymbolKind`]: Type discriminator (Directive, Anchor, Reference)
+//! - [`GlossaryTerm`]: Term from a `{glossary}` directive
+//!
+//! # Parsing Functions
+//!
+//! - [`parse_myst_symbols`]: Extract all MyST symbols from text
+//! - [`parse_glossary_terms`]: Extract glossary definitions
+
 use markdown::{mdast::Node, to_mdast, ParseOptions};
 use ropey::Rope;
 
 use crate::vault::MyRange;
 
 /// A glossary term extracted from a `{glossary}` directive.
+///
+/// Glossary terms are cross-referenced via the `{term}` role:
+///
+/// ```text
+/// ```{glossary}
+/// MyST
+///   Markedly Structured Text, an extended Markdown syntax.
+/// ```
+///
+/// This uses {term}`MyST` syntax.
+/// ```
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct GlossaryTerm {
     /// The term name (e.g., "MyST")
     pub term: String,
-    /// The definition text
+    /// The definition text (indented lines following the term)
     pub definition: String,
-    /// LSP-compatible range for go-to-definition navigation
+    /// Source location for go-to-definition
     pub range: MyRange,
 }
 
-/// Type-safe representation of MyST symbol kinds.
-/// Using an enum prevents typos and enables compile-time checking.
+/// Classification of MyST symbol types.
+///
+/// Used to distinguish different MyST constructs that share
+/// similar storage but different semantics.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum MystSymbolKind {
+    /// A code block directive: `{note}`, `{warning}`, `{code-block}`, etc.
+    ///
+    /// Directives may have a `:name:` option that creates a referenceable label.
     Directive,
+
+    /// An explicit anchor target: `(my-anchor)=`
+    ///
+    /// Creates a named location that can be cross-referenced via `{ref}`.
     Anchor,
-    #[allow(dead_code)] // Placeholder for future MyST cross-refs like {ref}`target`
+
+    /// A cross-reference role (placeholder for future expansion).
+    ///
+    /// Currently unused; roles are handled as [`Reference::MystRole`].
+    #[allow(dead_code)]
     Reference,
 }
 
+/// A MyST construct extracted from source text.
+///
+/// Represents either a directive (code block with MyST syntax) or an
+/// anchor (explicit target). Both can be referenced via MyST roles.
+///
+/// # Examples
+///
+/// ```text
+/// (quick-start)=          → MystSymbol { kind: Anchor, name: "quick-start", ... }
+///
+/// ```{admonition} Title   → MystSymbol { kind: Directive, name: "admonition", ... }
+/// :name: my-admonition       label: Some("my-admonition")
+/// Content here.
+/// ```
+/// ```
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct MystSymbol {
+    /// Whether this is a directive or anchor
     pub kind: MystSymbolKind,
+
+    /// The symbol name
+    ///
+    /// For directives: the directive type (e.g., "note", "code-block")
+    /// For anchors: the target name (e.g., "my-anchor")
     pub name: String,
+
+    /// Line number (0-indexed) where this symbol appears
     pub line: usize,
-    /// LSP-compatible range for go-to-definition navigation
+
+    /// Source location for navigation
     pub range: MyRange,
-    /// Extracted from `:label:` or `:name:` directive options
+
+    /// Optional label from `:name:` or `:label:` directive option.
+    ///
+    /// Enables referencing specific directive instances:
+    /// ```text
+    /// ```{figure} image.png
+    /// :name: fig-example
+    /// ```
+    ///
+    /// See {numref}`fig-example`.
+    /// ```
     pub label: Option<String>,
 }
 

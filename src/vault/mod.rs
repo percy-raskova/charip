@@ -268,28 +268,95 @@ fn find_range(referenceable: &Referenceable) -> Option<tower_lsp::lsp_types::Ran
     }
 }
 
-#[derive(Debug, Clone)]
-/// The in-memory representation of the Markdown vault files. This data is exposed through an interface of methods to select the vault's data.
-/// These methods do not do any interpretation or analysis of the data. That is up to the consumer of this struct. The methods are analogous to selecting on a database.
+/// The in-memory knowledge graph representing all Markdown documents.
+///
+/// The Vault is the central data structure of charip-lsp, containing all parsed
+/// documents and their relationships. It provides an interface to query documents,
+/// references, headings, anchors, and other parsed elements.
+///
+/// # Construction
+///
+/// Create a vault by scanning a directory:
+///
+/// ```rust,ignore
+/// use charip::vault::Vault;
+/// use charip::config::Settings;
+///
+/// let settings = Settings::default();
+/// let vault = Vault::construct_vault(&settings, &vault_path)?;
+/// ```
 ///
 /// # Storage Architecture
 ///
-/// The vault uses a petgraph-based storage model:
-/// - `graph`: Directed graph where nodes are `DocumentNode` and edges are `EdgeKind`
-/// - `node_index`: HashMap for O(1) path-to-NodeIndex lookup
-/// - `ropes`: Text content for efficient position mapping
+/// The vault uses a [petgraph](https://docs.rs/petgraph)-based storage model:
 ///
-/// Document data is accessed via the graph. References are stored in both
-/// `DocumentNode.references` (for complete access) and as graph edges
-/// (for efficient backlink queries).
+/// | Component | Type | Purpose |
+/// |-----------|------|---------|
+/// | `graph` | `DiGraph<DocumentNode, EdgeKind>` | Document relationships |
+/// | `node_index` | `HashMap<PathBuf, NodeIndex>` | O(1) path lookup |
+/// | `ropes` | `HashMap<PathBuf, Rope>` | Text content for positions |
+///
+/// Documents are graph nodes. References between documents are graph edges,
+/// enabling efficient backlink queries via [`petgraph::Direction::Incoming`].
+///
+/// # Key Methods
+///
+/// ## Document Access
+/// - [`get_document()`](Self::get_document) - Get a single document by path
+/// - [`documents()`](Self::documents) - Iterate all (path, node) pairs
+///
+/// ## Reference Queries
+/// - [`select_references()`](Self::select_references) - Outgoing links from a file
+/// - [`select_referenceable_nodes()`](Self::select_referenceable_nodes) - All linkable targets
+///
+/// ## MyST-Specific
+/// - [`select_myst_symbols()`](Self::select_myst_symbols) - MyST anchors and directives
+/// - [`select_myst_anchors()`](Self::select_myst_anchors) - Just `(target)=` anchors
+/// - [`select_glossary_terms()`](Self::select_glossary_terms) - Glossary entries
+///
+/// ## Updates
+/// - [`construct_vault()`](Self::construct_vault) - Initial full parse
+/// - [`update_vault()`](Self::update_vault) - Incremental single-file update
+///
+/// # Design Philosophy
+///
+/// The Vault exposes data through selection methods without interpretation.
+/// Analysis and decision-making (e.g., "is this link broken?") happens in
+/// consumer modules like `diagnostics` or `gotodef`. This separation keeps
+/// the Vault focused on efficient data access.
+///
+/// # Related Types
+///
+/// - [`DocumentNode`]: Individual parsed document
+/// - [`Reference`]: Outgoing link from a document
+/// - [`Referenceable`]: Target that can be linked to
+/// - [`Settings`](crate::config::Settings): Configuration for parsing
+#[derive(Debug, Clone)]
 pub struct Vault {
-    /// Raw text content for each file
+    /// Raw text content for each file, used for position mapping.
+    ///
+    /// [`Rope`] provides efficient line/column to byte offset conversion,
+    /// essential for LSP position handling.
     pub ropes: MyHashMap<Rope>,
-    /// Root directory of the vault
+
+    /// Root directory of the vault.
+    ///
+    /// All file paths in the vault are relative to this directory.
+    /// Used for resolving relative links and generating display paths.
     root_dir: PathBuf,
-    /// Graph-based storage for document relationships
+
+    /// Directed graph storing documents and their relationships.
+    ///
+    /// - **Nodes**: [`DocumentNode`] containing parsed file content
+    /// - **Edges**: [`EdgeKind`] representing reference relationships
+    ///
+    /// Use [`node_index`](Self::node_index) to find the [`NodeIndex`] for a path.
     pub graph: VaultGraph,
-    /// Lookup table: PathBuf -> NodeIndex for O(1) graph access
+
+    /// Maps file paths to their graph node indices.
+    ///
+    /// Provides O(1) lookup of documents by path. All paths are canonical
+    /// (resolved symlinks, no trailing slashes).
     pub node_index: HashMap<PathBuf, NodeIndex>,
 }
 
@@ -1452,23 +1519,98 @@ pub enum MystRoleKind {
     Abbr,     // {abbr}`MyST (Markedly Structured Text)` - abbreviation
 }
 
+/// A reference (link) from one location to another in the vault.
+///
+/// References represent outgoing links from a document. They are the "source"
+/// side of a link relationship, pointing to a [`Referenceable`] target.
+///
+/// # Variants
+///
+/// The enum covers different link syntaxes supported in MyST Markdown:
+///
+/// | Variant | Syntax Example | Description |
+/// |---------|----------------|-------------|
+/// | `Tag` | `#tag-name` | Hashtag reference |
+/// | `MDFileLink` | `[text](file.md)` | Standard markdown link to file |
+/// | `MDHeadingLink` | `[text](file.md#heading)` | Link to specific heading |
+/// | `MDIndexedBlockLink` | `[text](file.md#^block-id)` | Link to indexed block |
+/// | `Footnote` | `[^1]` | Footnote reference |
+/// | `LinkRef` | `[text][ref]` | Reference-style link |
+/// | `MystRole` | `{ref}\`target\`` | MyST role reference |
+/// | `ImageLink` | `![alt](image.png)` | Image embed |
+/// | `Substitution` | `{{variable}}` | MyST substitution |
+///
+/// # Common Data
+///
+/// All variants contain [`ReferenceData`] which provides:
+/// - Source location (range in document)
+/// - Reference text (the link target as written)
+/// - Display text (what the user sees)
+///
+/// Access this common data via the [`Deref`] implementation or [`ReferenceOps::data()`].
+///
+/// # Related Types
+///
+/// - [`Referenceable`]: The target that a Reference points to
+/// - [`ReferenceData`]: Common data for all reference types
+/// - [`ReferenceOps`]: Trait providing polymorphic operations
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Reference {
+    /// Hashtag reference: `#tag-name`
+    ///
+    /// Tags categorize documents and can be searched across the vault.
     #[allow(dead_code)] // Tag support; matched but not currently constructed
     Tag(ReferenceData),
+
+    /// Standard markdown link to a file: `[text](path/to/file.md)`
+    ///
+    /// The reference_text contains the relative or absolute path to the target file.
     MDFileLink(ReferenceData),
+
+    /// Markdown link to a heading: `[text](file.md#heading-slug)`
+    ///
+    /// - First field: Common reference data
+    /// - Second field: Target file identifier
+    /// - Third field: Heading slug (text after `#`)
     MDHeadingLink(ReferenceData, File, Specialref),
+
+    /// Markdown link to an indexed block: `[text](file.md#^block-id)`
+    ///
+    /// Indexed blocks are marked with `^block-id` in the source document.
+    /// - First field: Common reference data
+    /// - Second field: Target file identifier
+    /// - Third field: Block identifier (text after `#^`)
     MDIndexedBlockLink(ReferenceData, File, Specialref),
+
+    /// Footnote reference: `[^1]` or `[^note-name]`
+    ///
+    /// Points to a footnote definition elsewhere in the document.
     Footnote(ReferenceData),
+
+    /// Reference-style link: `[text][ref-id]`
+    ///
+    /// The actual URL is defined elsewhere: `[ref-id]: https://...`
     LinkRef(ReferenceData),
-    /// MyST role reference: {role}`target`
-    /// Fields: (data, role_kind, target)
+
+    /// MyST role reference: `{role}\`target\``
+    ///
+    /// MyST roles provide semantic cross-references:
+    /// - `{ref}\`anchor\`` - Cross-reference to named anchor
+    /// - `{doc}\`/path/file\`` - Link to document
+    /// - `{term}\`glossary-entry\`` - Glossary term reference
+    ///
+    /// Fields: (data, role_kind, target_text)
     MystRole(ReferenceData, MystRoleKind, String),
-    /// Image link: ![alt](path)
-    /// reference_text contains the image path
+
+    /// Image link: `![alt text](path/to/image.png)`
+    ///
+    /// The reference_text contains the image path.
     ImageLink(ReferenceData),
-    /// MyST substitution reference: {{variable}}
-    /// reference_text contains the variable name (without braces)
+
+    /// MyST substitution reference: `{{variable}}`
+    ///
+    /// Substitutions are defined in frontmatter or conf.py and expanded during build.
+    /// The reference_text contains the variable name (without braces).
     Substitution(ReferenceData),
 }
 
@@ -2143,39 +2285,134 @@ impl MDLinkReferenceDefinition {
     }
 }
 
+/// A target that can be referenced by a [`Reference`].
+///
+/// Referenceables represent the "destination" side of a link relationship.
+/// They are things that can be pointed to: files, headings, anchors, tags, etc.
+///
+/// # Variants
+///
+/// The enum covers all targetable elements in MyST Markdown:
+///
+/// | Variant | Target | Reference Syntax |
+/// |---------|--------|------------------|
+/// | `File` | Document file | `[text](file.md)` |
+/// | `Heading` | Section heading | `[text](file.md#heading)` |
+/// | `IndexedBlock` | Block with `^id` | `[text](file.md#^id)` |
+/// | `Tag` | Hashtag | `#tag-name` |
+/// | `Footnote` | Footnote definition | `[^note]` |
+/// | `LinkRefDef` | Reference definition | `[text][ref]` |
+/// | `MystAnchor` | `(target)=` anchor | `{ref}\`target\`` |
+/// | `GlossaryTerm` | Glossary entry | `{term}\`word\`` |
+/// | `MathLabel` | Equation label | `{eq}\`label\`` |
+/// | `SubstitutionDef` | `{{var}}` definition | `{{var}}` |
+/// | `DirectiveLabel` | `:name:` directive | `{ref}\`name\`` |
+///
+/// # Unresolved Variants
+///
+/// Some variants represent targets that could not be resolved to existing content:
+/// - `UnresolvedFile` - File path that doesn't exist
+/// - `UnresolvedHeading` - Heading that doesn't exist in target file
+/// - `UnresolvedIndexedBlock` - Block ID that doesn't exist
+///
+/// These are used for diagnostics (broken link detection) and creation workflows.
+///
+/// # Design Notes
+///
+/// This is an enum rather than a trait because:
+/// 1. Pattern matching is ergonomic for differentiated behavior
+/// 2. Each variant carries the file path for resolution context
+/// 3. Avoids dynamic dispatch overhead
+///
+/// # Key Methods
+///
+/// - [`get_refname()`](Self::get_refname) - Get the canonical reference text
+/// - [`is_reference()`](Self::is_reference) - Check if text references this target
+/// - [`get_path()`](Self::get_path) - Get the containing file's path
+///
+/// # Related Types
+///
+/// - [`Reference`]: The source side of a link (what points here)
+/// - [`DocumentNode`]: The parsed document containing referenceables
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-/**
-An algebraic type for methods on all referenceables, which are anything able to be referenced through a Markdown link or tag.
-These include files, headings, indexed blocks, tags, MyST anchors, etc.
-
-I chose to use an enum instead of a trait as (1) I dislike the ergonomics with dynamic dispatch, (2) it is sometimes necessary to differentiate between members of this abstraction, (3) it was convenient for this abstraction to hold the path of the referenceable for use in matching link names etc...
-
-The vault struct is focused on presenting data from the vault through a good usable interface. The vault module as a whole, however, is in charge of interfacing with the Markdown/MyST syntax, which is where the methods on this enum are applicable. Markdown has specific linking styles, and the methods on this enum provide a way to work with this syntax in a way that decouples the interpretation from other modules. The most common method is `is_reference` which tells if a piece of text is a reference to a particular referenceable (which is implemented differently for each type of referenceable). As a whole, this provides an abstraction around interpreting Markdown/MyST syntax.
-*/
 pub enum Referenceable<'a> {
+    /// A document file that can be linked to.
+    ///
+    /// Fields: (file_path, parsed_document)
     File(&'a PathBuf, &'a DocumentNode),
+
+    /// A section heading within a document.
+    ///
+    /// Referenced via `#heading-slug` suffix in links.
+    /// Fields: (file_path, heading_data)
     Heading(&'a PathBuf, &'a MDHeading),
+
+    /// A block marked with `^block-id` for direct linking.
+    ///
+    /// Referenced via `#^block-id` suffix in links.
+    /// Fields: (file_path, block_data)
     IndexedBlock(&'a PathBuf, &'a MDIndexedBlock),
+
+    /// A hashtag that categorizes content.
+    ///
+    /// Tags can appear anywhere and are searchable across the vault.
+    /// Fields: (file_path, tag_data)
     Tag(&'a PathBuf, &'a MDTag),
+
+    /// A footnote definition: `[^name]: Content here`
+    ///
+    /// Fields: (file_path, footnote_data)
     Footnote(&'a PathBuf, &'a MDFootnote),
-    // TODO: Get rid of useless path here
+
+    /// A file path that doesn't resolve to an existing file.
+    ///
+    /// Used for broken link diagnostics and "create file" code actions.
+    /// Fields: (attempted_path, reference_text)
     UnresolvedFile(PathBuf, &'a String),
+
+    /// A heading reference that doesn't exist in the target file.
+    ///
+    /// Fields: (file_path, link_path, heading_slug)
     UnresolvedHeading(PathBuf, &'a String, &'a String),
-    /// full path, link path, index (without ^)
+
+    /// A block ID reference that doesn't exist in the target file.
+    ///
+    /// Fields: (file_path, link_path, block_id_without_caret)
     UnresolvedIndexedBlock(PathBuf, &'a String, &'a String),
+
+    /// A reference-style link definition: `[ref]: https://...`
+    ///
+    /// Fields: (file_path, definition_data)
     LinkRefDef(&'a PathBuf, &'a MDLinkReferenceDefinition),
-    /// MyST anchor target: `(my-target)=`
+
+    /// MyST explicit anchor target: `(my-anchor)=`
+    ///
+    /// Cross-referenced via `{ref}\`my-anchor\`` role.
+    /// Fields: (file_path, symbol_data)
     MystAnchor(&'a PathBuf, &'a MystSymbol),
-    /// Glossary term: term name referenced via `{term}`term``
+
+    /// Glossary term defined in a glossary directive.
+    ///
+    /// Cross-referenced via `{term}\`word\`` role.
+    /// Fields: (file_path, term_data)
     GlossaryTerm(&'a PathBuf, &'a GlossaryTerm),
-    /// Math equation label: referenced via `{eq}`label``
-    /// Only created for `{math}` directives that have a `:label:` option
+
+    /// Math equation label from a `{math}` directive with `:label:` option.
+    ///
+    /// Cross-referenced via `{eq}\`label\`` role.
+    /// Fields: (file_path, symbol_data)
     MathLabel(&'a PathBuf, &'a MystSymbol),
-    /// Substitution definition from frontmatter: {{variable}}
-    /// **File-local**: substitutions only resolve within the same file
+
+    /// Substitution definition from YAML frontmatter.
+    ///
+    /// Expanded via `{{variable}}` syntax. File-local scope only.
+    /// Fields: (file_path, substitution_data)
     SubstitutionDef(&'a PathBuf, &'a MDSubstitutionDef),
-    /// Directive label: `:name:` or `:label:` option in MyST directives
-    /// Referenced via `{ref}`, `{numref}`, etc.
+
+    /// Named directive via `:name:` or `:label:` option.
+    ///
+    /// Cross-referenced via `{ref}\`name\`` or `{numref}\`name\`` role.
+    /// Fields: (file_path, symbol_data)
     DirectiveLabel(&'a PathBuf, &'a MystSymbol),
 }
 impl Referenceable<'_> {

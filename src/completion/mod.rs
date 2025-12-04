@@ -1,3 +1,70 @@
+//! Autocomplete providers for MyST Markdown documents.
+//!
+//! This module implements the LSP `textDocument/completion` capability,
+//! providing context-aware suggestions as users type.
+//!
+//! # Architecture
+//!
+//! The completion system uses a chain-of-responsibility pattern:
+//!
+//! ```text
+//! get_completions()
+//!     ├── MystDirectiveCompleter   (```{directive)
+//!     ├── RoleNameCompleter        ({ref, {doc, etc.)
+//!     ├── MystRoleCompleter        ({ref}`target`)
+//!     ├── MarkdownLinkCompleter    ([text](path))
+//!     ├── TagCompleter             (#tag-name)
+//!     ├── FootnoteCompleter        ([^footnote])
+//!     ├── CalloutCompleter         (> [!note])
+//!     └── UnindexedBlockCompleter  (^block-id)
+//! ```
+//!
+//! Each completer is tried in order. The first one that matches the
+//! cursor context provides completions.
+//!
+//! # Trigger Characters
+//!
+//! Completions are triggered by specific characters:
+//!
+//! | Trigger | Context | Completer |
+//! |---------|---------|-----------|
+//! | `{` | Start of MyST role | RoleNameCompleter |
+//! | `` ` `` | Inside role target | MystRoleCompleter |
+//! | `(` | Inside markdown link | MarkdownLinkCompleter |
+//! | `#` | Tag or heading | TagCompleter |
+//! | `[` | Link or footnote | FootnoteCompleter |
+//! | `>` | Blockquote/callout | CalloutCompleter |
+//! | ` ` | Various contexts | Context-dependent |
+//!
+//! # Writing a Completer
+//!
+//! Implement the [`Completer`] trait:
+//!
+//! ```rust,ignore
+//! impl<'a> Completer<'a> for MyCompleter {
+//!     fn construct(context: Context<'a>, line: usize, char: usize) -> Option<Self> {
+//!         // Return Some(self) if cursor is in valid context
+//!     }
+//!
+//!     fn completions(&self) -> Vec<impl Completable<'a, Self>> {
+//!         // Return items to show in completion menu
+//!     }
+//! }
+//! ```
+//!
+//! # Submodules
+//!
+//! | Module | Purpose |
+//! |--------|---------|
+//! | [`link_completer`] | Markdown links `[](path)` |
+//! | [`myst_directive_completer`] | MyST directives `{directive}` |
+//! | [`myst_role_completer`] | MyST role targets `{ref}\`target\`` |
+//! | [`role_name_completer`] | MyST role names `{ref`, `{doc` |
+//! | [`tag_completer`] | Tags `#topic` |
+//! | [`footnote_completer`] | Footnotes `[^name]` |
+//! | [`callout_completer`] | Admonitions `> [!note]` |
+//! | [`matcher`] | Fuzzy matching utilities |
+
 use std::path::Path;
 
 use tower_lsp::lsp_types::{CompletionItem, CompletionList, CompletionParams, CompletionResponse};

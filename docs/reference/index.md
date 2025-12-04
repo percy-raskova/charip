@@ -20,6 +20,18 @@ Complete reference documentation for charip-lsp.
 {doc}`cli`
 : Command-line interface reference.
 
+## Rust API Documentation
+
+For developers extending or embedding charip-lsp, the Rust API documentation provides detailed information about internal types and functions.
+
+**[View Rust API Docs →](https://percy-raskova.github.io/charip/charip/)**
+
+Key modules:
+- **vault** - Core data structures (Vault, DocumentNode, Reference)
+- **completion** - Autocomplete providers
+- **myst_parser** - MyST syntax extraction
+- **config** - Configuration management
+
 ## Quick Reference
 
 ### Trigger Characters
