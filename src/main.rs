@@ -359,6 +359,7 @@ impl LanguageServer for Backend {
                     resolve_provider: Some(false),
                     trigger_characters: Some(vec![
                         "[".into(),
+                        "{".into(),
                         " ".into(),
                         "(".into(),
                         "#".into(),

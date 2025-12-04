@@ -131,18 +131,35 @@ impl<'a> Completer<'a> for MystRoleCompleter<'a> {
         let referenceables = self.vault.select_referenceable_nodes(None);
         let partial_lower = self.partial_target.to_lowercase();
 
+        // Check if we're using root-relative path syntax (starts with /)
+        let uses_root_prefix = self.partial_target.starts_with('/');
+
         referenceables
             .into_iter()
             .filter_map(|referenceable| {
-                let completion = RoleCompletion::from_referenceable(
-                    referenceable,
-                    self.role_type,
-                    self.vault,
-                    self.path,
-                )?;
+                // For Doc/Download roles, use the root-prefix-aware method
+                let completion = if matches!(self.role_type, RoleType::Doc | RoleType::Download) {
+                    RoleCompletion::from_referenceable_with_root_prefix(
+                        referenceable,
+                        self.role_type,
+                        self.vault,
+                        self.path,
+                        &self.partial_target,
+                    )
+                } else {
+                    RoleCompletion::from_referenceable(
+                        referenceable,
+                        self.role_type,
+                        self.vault,
+                        self.path,
+                    )
+                }?;
 
-                // Filter by partial input
-                if partial_lower.is_empty()
+                // Filter by partial input (root-prefix method handles its own filtering)
+                if uses_root_prefix {
+                    // Already filtered by from_referenceable_with_root_prefix
+                    Some(completion)
+                } else if partial_lower.is_empty()
                     || completion.label.to_lowercase().contains(&partial_lower)
                 {
                     Some(completion)
@@ -242,6 +259,94 @@ impl RoleCompletion {
             }
             _ => None,
         }
+    }
+
+    /// Create a role completion with support for root-relative paths.
+    ///
+    /// When `partial_target` starts with `/`, paths are calculated from the vault root
+    /// instead of relative to the current file. The `/` prefix is preserved in the
+    /// insert text.
+    ///
+    /// # Arguments
+    ///
+    /// * `referenceable` - The referenceable item to create a completion for
+    /// * `role_type` - The type of role being completed
+    /// * `vault` - Reference to the vault
+    /// * `current_path` - Path of the current file
+    /// * `partial_target` - The partial target typed so far (may start with `/`)
+    ///
+    /// # Returns
+    ///
+    /// `Some(RoleCompletion)` if the referenceable matches the role type and
+    /// passes the filter, `None` otherwise.
+    fn from_referenceable_with_root_prefix(
+        referenceable: Referenceable<'_>,
+        role_type: RoleType,
+        vault: &Vault,
+        current_path: &std::path::Path,
+        partial_target: &str,
+    ) -> Option<Self> {
+        let use_root_prefix = partial_target.starts_with('/');
+
+        match (role_type, &referenceable) {
+            // {doc} and {download} complete file paths
+            (RoleType::Doc | RoleType::Download, Referenceable::File(target_path, _mdfile)) => {
+                let ref_path = get_relative_ref_path(vault.root_dir(), target_path)?;
+
+                let insert_text = if use_root_prefix {
+                    // Calculate path from vault root, prefixed with /
+                    calculate_root_relative_path(target_path, vault.root_dir())
+                } else {
+                    // Use standard relative path from current file
+                    calculate_relative_path(current_path, target_path, vault.root_dir())
+                };
+
+                // Filter: if partial_target has content, check if insert_text matches
+                if !partial_target.is_empty() {
+                    let filter_target = if use_root_prefix {
+                        &partial_target[1..] // Remove leading /
+                    } else {
+                        partial_target
+                    };
+
+                    // Check if the path matches the filter
+                    if !filter_target.is_empty() && !insert_text.contains(filter_target) {
+                        return None;
+                    }
+                }
+
+                Some(RoleCompletion {
+                    label: insert_text.clone(),
+                    insert_text,
+                    detail: Some(ref_path),
+                    kind: CompletionItemKind::FILE,
+                })
+            }
+            // For non-file completions, delegate to the standard method
+            _ => Self::from_referenceable(referenceable, role_type, vault, current_path),
+        }
+    }
+}
+
+/// Calculate a path from the vault root, prefixed with `/`.
+///
+/// This is used when the user types `/` at the start of a target to indicate
+/// they want an absolute path from the vault root.
+fn calculate_root_relative_path(
+    target_path: &std::path::Path,
+    root_dir: &std::path::Path,
+) -> String {
+    // Strip the root_dir prefix and the .md extension
+    if let Ok(relative) = target_path.strip_prefix(root_dir) {
+        let path_str = relative.with_extension("").display().to_string();
+        format!("/{}", path_str)
+    } else {
+        // Fallback: just use the filename
+        let filename = target_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        format!("/{}", filename)
     }
 }
 
@@ -834,6 +939,235 @@ x = 1
                 completion.kind,
                 tower_lsp::lsp_types::CompletionItemKind::REFERENCE,
                 "Math label completion should use REFERENCE kind"
+            );
+        }
+    }
+
+    // =========================================================================
+    // Root-Relative Path Completion Tests
+    // =========================================================================
+    //
+    // Tests for the `/` prefix path completion feature.
+    // When a user types `/` at the start of a target, paths should be
+    // calculated from the vault root instead of relative to the current file.
+
+    mod root_relative_path_tests {
+        use super::*;
+        use crate::config::Settings;
+        use crate::test_utils::create_test_vault_dir;
+        use crate::vault::Vault;
+        use std::fs;
+
+        /// Test: {doc}`/ prefix suggests files from vault root.
+        ///
+        /// When typing `{doc}`/`, completions should show files relative
+        /// to the vault root, not the current file's directory.
+        #[test]
+        fn test_root_prefix_suggests_from_vault_root() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create directory structure
+            fs::create_dir(vault_dir.join("guides")).unwrap();
+            fs::create_dir(vault_dir.join("api")).unwrap();
+
+            // Files at different levels
+            fs::write(vault_dir.join("index.md"), "# Index").unwrap();
+            fs::write(vault_dir.join("guides/intro.md"), "# Intro").unwrap();
+            fs::write(vault_dir.join("api/reference.md"), "# Reference").unwrap();
+
+            let settings = Settings::default();
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            // Current file is in a subdirectory
+            let current_path = vault_dir.join("guides/intro.md");
+
+            // Get completions for {doc}` with root prefix /
+            let referenceables = vault.select_referenceable_nodes(None);
+            let partial_target = "/";
+
+            let completions: Vec<_> = referenceables
+                .iter()
+                .filter_map(|r| {
+                    RoleCompletion::from_referenceable_with_root_prefix(
+                        r.clone(),
+                        RoleType::Doc,
+                        &vault,
+                        &current_path,
+                        partial_target,
+                    )
+                })
+                .collect();
+
+            // Should have completions for files
+            assert!(
+                !completions.is_empty(),
+                "Should have completions with root prefix"
+            );
+
+            // Completions should use root-relative paths (starting with /)
+            let labels: Vec<_> = completions.iter().map(|c| c.insert_text.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("/")),
+                "At least one completion should start with /. Got: {:?}",
+                labels
+            );
+        }
+
+        /// Test: Root prefix is preserved in insert text.
+        ///
+        /// When selecting a completion from a root-prefixed search,
+        /// the insert text should preserve the `/` prefix.
+        #[test]
+        fn test_root_prefix_preserved_in_insert_text() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            fs::create_dir(vault_dir.join("guides")).unwrap();
+            fs::write(vault_dir.join("guides/intro.md"), "# Intro").unwrap();
+
+            let settings = Settings::default();
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            // Current file in root
+            let current_path = vault_dir.join("index.md");
+
+            let referenceables = vault.select_referenceable_nodes(None);
+            let partial_target = "/guides/";
+
+            let completions: Vec<_> = referenceables
+                .iter()
+                .filter_map(|r| {
+                    RoleCompletion::from_referenceable_with_root_prefix(
+                        r.clone(),
+                        RoleType::Doc,
+                        &vault,
+                        &current_path,
+                        partial_target,
+                    )
+                })
+                .collect();
+
+            // Find intro.md completion
+            let intro_completion = completions
+                .iter()
+                .find(|c| c.label.contains("intro") || c.insert_text.contains("intro"));
+
+            assert!(
+                intro_completion.is_some(),
+                "Should find intro completion. Got: {:?}",
+                completions
+            );
+
+            let intro = intro_completion.unwrap();
+            assert!(
+                intro.insert_text.starts_with("/"),
+                "Insert text should start with /: {}",
+                intro.insert_text
+            );
+            assert!(
+                intro.insert_text.contains("guides"),
+                "Insert text should contain path: {}",
+                intro.insert_text
+            );
+        }
+
+        /// Test: Relative path still works (no regression).
+        ///
+        /// When NOT using the `/` prefix, paths should still be relative
+        /// to the current file.
+        #[test]
+        fn test_relative_path_still_works() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            fs::create_dir(vault_dir.join("guides")).unwrap();
+            fs::write(vault_dir.join("guides/intro.md"), "# Intro").unwrap();
+            fs::write(vault_dir.join("guides/advanced.md"), "# Advanced").unwrap();
+
+            let settings = Settings::default();
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            // Current file is in guides/
+            let current_path = vault_dir.join("guides/intro.md");
+
+            let referenceables = vault.select_referenceable_nodes(None);
+
+            // Without root prefix, use regular relative path completion
+            let completions: Vec<_> = referenceables
+                .iter()
+                .filter_map(|r| {
+                    RoleCompletion::from_referenceable(
+                        r.clone(),
+                        RoleType::Doc,
+                        &vault,
+                        &current_path,
+                    )
+                })
+                .collect();
+
+            // Find advanced.md completion
+            let advanced_completion = completions.iter().find(|c| c.label.contains("advanced"));
+
+            assert!(
+                advanced_completion.is_some(),
+                "Should find advanced completion"
+            );
+
+            let advanced = advanced_completion.unwrap();
+            // Relative path should use ./ or bare name, not /
+            assert!(
+                !advanced.insert_text.starts_with("/"),
+                "Relative path should not start with /: {}",
+                advanced.insert_text
+            );
+        }
+
+        /// Test: Root prefix with subdirectory filters correctly.
+        ///
+        /// When typing `{doc}`/guides/`, only files in the guides directory
+        /// should be shown.
+        #[test]
+        fn test_root_with_subdirectory() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            fs::create_dir(vault_dir.join("guides")).unwrap();
+            fs::create_dir(vault_dir.join("api")).unwrap();
+            fs::write(vault_dir.join("guides/intro.md"), "# Intro").unwrap();
+            fs::write(vault_dir.join("api/reference.md"), "# Reference").unwrap();
+
+            let settings = Settings::default();
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let current_path = vault_dir.join("index.md");
+            let referenceables = vault.select_referenceable_nodes(None);
+            let partial_target = "/guides/";
+
+            let completions: Vec<_> = referenceables
+                .iter()
+                .filter_map(|r| {
+                    RoleCompletion::from_referenceable_with_root_prefix(
+                        r.clone(),
+                        RoleType::Doc,
+                        &vault,
+                        &current_path,
+                        partial_target,
+                    )
+                })
+                .collect();
+
+            // Should only show files in guides/, not api/
+            let labels: Vec<_> = completions.iter().map(|c| c.insert_text.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.contains("guides")),
+                "Should have guides completions: {:?}",
+                labels
+            );
+            assert!(
+                !labels.iter().any(|l| l.contains("api")),
+                "Should NOT have api completions when filtering by /guides/: {:?}",
+                labels
             );
         }
     }

@@ -7,6 +7,7 @@ use crate::{config::Settings, vault::Vault};
 use self::callout_completer::CalloutCompleter;
 use self::myst_directive_completer::MystDirectiveCompleter;
 use self::myst_role_completer::MystRoleCompleter;
+use self::role_name_completer::RoleNameCompleter;
 use self::{
     footnote_completer::FootnoteCompleter, link_completer::MarkdownLinkCompleter,
     tag_completer::TagCompleter, unindexed_block_completer::UnindexedBlockCompleter,
@@ -18,6 +19,7 @@ mod link_completer;
 mod matcher;
 mod myst_directive_completer;
 mod myst_role_completer;
+mod role_name_completer;
 mod tag_completer;
 mod unindexed_block_completer;
 mod util;
@@ -71,7 +73,16 @@ pub fn get_completions(
         params.text_document_position.position.line,
         params.text_document_position.position.character,
     )
-    // MyST role completion ({ref}`, {doc}`, etc.)
+    // Role name completion ({  -> suggests ref, doc, etc.)
+    // High priority - before MystRoleCompleter which handles target completion
+    .or_else(|| {
+        run_completer::<RoleNameCompleter>(
+            completion_context,
+            params.text_document_position.position.line,
+            params.text_document_position.position.character,
+        )
+    })
+    // MyST role TARGET completion ({ref}`, {doc}`, etc.)
     .or_else(|| {
         run_completer::<MystRoleCompleter>(
             completion_context,
