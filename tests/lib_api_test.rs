@@ -3,6 +3,11 @@
 //! These tests verify that the library can be used as an external dependency,
 //! ensuring the lib+bin separation works correctly.
 
+// These are compile-time accessibility tests - the assertions verify the code compiles
+#![allow(clippy::assertions_on_constants)]
+// Helper functions exist to prove types are accessible, not to be called
+#![allow(dead_code)]
+
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
