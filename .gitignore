@@ -5,3 +5,4 @@ Session.vim
 .env
 /.devenv
 .claude/settings.local.json
+.claude/settings.local.json
