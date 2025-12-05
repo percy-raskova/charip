@@ -87,7 +87,7 @@ pub struct DocumentNode {
     pub tags: Vec<MDTag>,
     /// Footnote definitions ([^1]: footnote text)
     pub footnotes: Vec<MDFootnote>,
-    /// Link reference definitions ([label]: url)
+    /// Link reference definitions (`[label]: url`)
     pub link_reference_definitions: Vec<MDLinkReferenceDefinition>,
     /// Parsed frontmatter metadata
     pub metadata: Option<MDMetadata>,

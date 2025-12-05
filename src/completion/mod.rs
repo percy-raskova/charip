@@ -56,14 +56,14 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | [`link_completer`] | Markdown links `[](path)` |
-//! | [`myst_directive_completer`] | MyST directives `{directive}` |
-//! | [`myst_role_completer`] | MyST role targets `{ref}\`target\`` |
-//! | [`role_name_completer`] | MyST role names `{ref`, `{doc` |
-//! | [`tag_completer`] | Tags `#topic` |
-//! | [`footnote_completer`] | Footnotes `[^name]` |
-//! | [`callout_completer`] | Admonitions `> [!note]` |
-//! | [`matcher`] | Fuzzy matching utilities |
+//! | `link_completer` | Markdown links `[](path)` |
+//! | `myst_directive_completer` | MyST directives `{directive}` |
+//! | `myst_role_completer` | MyST role targets `{ref}\`target\`` |
+//! | `role_name_completer` | MyST role names `{ref`, `{doc` |
+//! | `tag_completer` | Tags `#topic` |
+//! | `footnote_completer` | Footnotes `[^name]` |
+//! | `callout_completer` | Admonitions `> [!note]` |
+//! | `matcher` | Fuzzy matching utilities |
 
 use std::path::Path;
 

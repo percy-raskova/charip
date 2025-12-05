@@ -6,13 +6,14 @@ on:
   pull_request:
     branches: [main]
 
-# Allow one concurrent deployment
+# Allow one concurrent deployment per branch
 concurrency:
-  group: "pages"
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTDOCFLAGS: "-D warnings"
 
 jobs:
   build:
@@ -37,8 +38,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-docs-
 
+      - name: Run doc tests
+        run: cargo test --doc
+
       - name: Build cargo doc
         run: cargo doc --no-deps --lib
+
+      - name: Verify redirect target exists
+        run: test -d target/doc/charip || { echo "ERROR: charip/ not found"; exit 1; }
 
       - name: Add redirect index
         run: echo '<meta http-equiv="refresh" content="0;url=charip/">' > target/doc/index.html

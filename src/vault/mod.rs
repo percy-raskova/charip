@@ -330,7 +330,7 @@ fn find_range(referenceable: &Referenceable) -> Option<tower_lsp::lsp_types::Ran
 /// - [`DocumentNode`]: Individual parsed document
 /// - [`Reference`]: Outgoing link from a document
 /// - [`Referenceable`]: Target that can be linked to
-/// - [`Settings`](crate::config::Settings): Configuration for parsing
+/// - [`crate::config::Settings`]: Configuration for parsing
 #[derive(Debug, Clone)]
 pub struct Vault {
     /// Raw text content for each file, used for position mapping.
@@ -426,7 +426,7 @@ impl Vault {
         }
     }
 
-    /// Select all references ([[link]] or #tag) in a file if path is Some, else all in vault.
+    /// Select all references (`[[link]]` or `#tag`) in a file if path is Some, else all in vault.
     ///
     /// References are stored in DocumentNode.references for complete access.
     /// Note: Resolved file-to-file references are also stored as graph edges
@@ -2327,7 +2327,6 @@ impl MDLinkReferenceDefinition {
 /// # Key Methods
 ///
 /// - [`get_refname()`](Self::get_refname) - Get the canonical reference text
-/// - [`is_reference()`](Self::is_reference) - Check if text references this target
 /// - [`get_path()`](Self::get_path) - Get the containing file's path
 ///
 /// # Related Types

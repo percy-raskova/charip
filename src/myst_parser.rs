@@ -22,7 +22,7 @@
 //!
 //! # Parsing Functions
 //!
-//! - [`parse_myst_symbols`]: Extract all MyST symbols from text
+//! - [`parse`]: Extract all MyST symbols from text
 //! - [`parse_glossary_terms`]: Extract glossary definitions
 
 use markdown::{mdast::Node, to_mdast, ParseOptions};
@@ -34,14 +34,14 @@ use crate::vault::MyRange;
 ///
 /// Glossary terms are cross-referenced via the `{term}` role:
 ///
-/// ```text
+/// ````text
 /// ```{glossary}
 /// MyST
 ///   Markedly Structured Text, an extended Markdown syntax.
 /// ```
 ///
 /// This uses {term}`MyST` syntax.
-/// ```
+/// ````
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct GlossaryTerm {
     /// The term name (e.g., "MyST")
@@ -70,7 +70,7 @@ pub enum MystSymbolKind {
 
     /// A cross-reference role (placeholder for future expansion).
     ///
-    /// Currently unused; roles are handled as [`Reference::MystRole`].
+    /// Currently unused; roles are handled as `Reference::MystRole` in the vault module.
     #[allow(dead_code)]
     Reference,
 }
@@ -82,14 +82,14 @@ pub enum MystSymbolKind {
 ///
 /// # Examples
 ///
-/// ```text
+/// ````text
 /// (quick-start)=          → MystSymbol { kind: Anchor, name: "quick-start", ... }
 ///
 /// ```{admonition} Title   → MystSymbol { kind: Directive, name: "admonition", ... }
 /// :name: my-admonition       label: Some("my-admonition")
 /// Content here.
 /// ```
-/// ```
+/// ````
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct MystSymbol {
     /// Whether this is a directive or anchor
@@ -110,13 +110,13 @@ pub struct MystSymbol {
     /// Optional label from `:name:` or `:label:` directive option.
     ///
     /// Enables referencing specific directive instances:
-    /// ```text
+    /// ````text
     /// ```{figure} image.png
     /// :name: fig-example
     /// ```
     ///
     /// See {numref}`fig-example`.
-    /// ```
+    /// ````
     pub label: Option<String>,
 }
 
@@ -126,12 +126,12 @@ pub struct MystSymbol {
 /// by a line starting with non-whitespace followed by indented definition lines.
 ///
 /// # Example
-/// ```ignore
+/// ````text
 /// ```{glossary}
 /// MyST
 ///   Markedly Structured Text, an extended Markdown syntax.
 /// ```
-/// ```
+/// ````
 pub fn parse_glossary_terms(text: &str) -> Vec<GlossaryTerm> {
     let options = ParseOptions::default();
     let rope = Rope::from_str(text);
@@ -395,7 +395,8 @@ pub struct ToctreeEntry {
 /// its caption (if any) and entry paths.
 ///
 /// # Example
-/// ```ignore
+///
+/// ````text
 /// let text = r#"
 /// ```{toctree}
 /// :caption: Getting Started
@@ -406,9 +407,9 @@ pub struct ToctreeEntry {
 /// "#;
 /// let toctrees = parse_toctrees(text);
 /// assert_eq!(toctrees.len(), 1);
-/// assert_eq!(toctrees[0].caption, Some("Getting Started".to_string()));
-/// assert_eq!(toctrees[0].entries, vec!["intro", "installation"]);
-/// ```
+/// assert_eq!(toctrees\[0\].caption, Some("Getting Started".to_string()));
+/// assert_eq!(toctrees\[0\].entries, vec!["intro", "installation"]);
+/// ````
 pub fn parse_toctrees(text: &str) -> Vec<ToctreeEntry> {
     use markdown::{to_mdast, ParseOptions};
 
@@ -486,14 +487,15 @@ fn parse_toctree_content(content: &str) -> (Option<String>, Vec<String>) {
 /// - Content may contain the file path
 ///
 /// # Example
-/// ```ignore
+///
+/// ````text
 /// let text = r#"
 /// ```{include} shared/header.md
 /// ```
 /// "#;
 /// let includes = parse_includes(text);
 /// assert_eq!(includes, vec!["shared/header.md"]);
-/// ```
+/// ````
 pub fn parse_includes(text: &str) -> Vec<String> {
     use markdown::{to_mdast, ParseOptions};
 
