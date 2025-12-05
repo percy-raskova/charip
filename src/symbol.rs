@@ -1,3 +1,35 @@
+//! Symbol providers for MyST Markdown documents.
+//!
+//! This module implements LSP symbol capabilities:
+//! - `textDocument/documentSymbol` - outline view of current file
+//! - `workspace/symbol` - fuzzy search across all files
+//!
+//! # Document Symbols
+//!
+//! The document outline includes:
+//!
+//! | Symbol Type | LSP Kind | Example |
+//! |-------------|----------|---------|
+//! | Headings | `Struct` | `# Introduction` |
+//! | MyST anchors | `Key` | `(my-anchor)=` |
+//! | Labeled directives | `Object` | `:name: fig-example` |
+//! | Glossary terms | `Constant` | `MyST` in `{glossary}` |
+//!
+//! Symbols are returned in document order (sorted by line number).
+//!
+//! # Workspace Symbols
+//!
+//! Fuzzy search across the entire vault using [`nucleo_matcher`].
+//! Returns all referenceables (files, headings, anchors, tags, etc.)
+//! ranked by match score.
+//!
+//! # Architecture
+//!
+//! ```text
+//! document_symbol()   → FlatSymbol list → DocumentSymbolResponse
+//! workspace_symbol()  → fuzzy match     → Vec<SymbolInformation>
+//! ```
+
 use std::{iter, path::Path};
 
 use itertools::Itertools;
@@ -29,6 +61,20 @@ fn compute_match_score(
     )
 }
 
+/// Search for symbols across the entire vault.
+///
+/// Performs fuzzy matching against all referenceables (files, headings,
+/// anchors, tags, indexed blocks) and returns results ranked by match score.
+///
+/// # Arguments
+///
+/// * `vault` - The indexed vault
+/// * `_params` - LSP workspace symbol request (contains query string)
+///
+/// # Returns
+///
+/// Vector of matching symbols, sorted by fuzzy match score (best first).
+/// Returns empty vector if query matches nothing.
 pub fn workspace_symbol(
     vault: &Vault,
     _params: &WorkspaceSymbolParams,
@@ -59,7 +105,7 @@ pub fn workspace_symbol(
     )
 }
 
-/// Represents a document symbol with its line number for sorting.
+/// Internal representation of a document symbol for sorting.
 #[derive(Debug)]
 struct FlatSymbol {
     name: String,
@@ -69,6 +115,24 @@ struct FlatSymbol {
     line: u32,
 }
 
+/// Get document outline symbols for a single file.
+///
+/// Returns all navigable symbols in the document:
+/// - Headings (H1-H6)
+/// - MyST anchors (`(target)=`)
+/// - Labeled directives (`:name:` option)
+/// - Glossary terms
+///
+/// # Arguments
+///
+/// * `vault` - The indexed vault
+/// * `_params` - LSP document symbol request
+/// * `path` - Path to the file
+///
+/// # Returns
+///
+/// Flat list of symbols sorted by line number, or `None` if file
+/// has no symbols or doesn't exist in the vault.
 pub fn document_symbol(
     vault: &Vault,
     _params: &DocumentSymbolParams,

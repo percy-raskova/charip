@@ -1,3 +1,42 @@
+//! Diagnostic providers for MyST Markdown documents.
+//!
+//! This module implements the LSP `textDocument/publishDiagnostics` capability,
+//! detecting errors and warnings in documents.
+//!
+//! # Diagnostic Types
+//!
+//! | Type | Severity | Description |
+//! |------|----------|-------------|
+//! | Broken link | Error | Markdown link to non-existent file/heading |
+//! | Broken MyST role | Error | `{ref}`, `{doc}`, `{term}` with invalid target |
+//! | Broken image | Error | Image path that doesn't exist on disk |
+//! | Undefined substitution | Warning | `{{var}}` with no definition |
+//! | Frontmatter error | Error | Invalid YAML or schema violation |
+//!
+//! # Architecture
+//!
+//! Diagnostics are collected per-file and published when the file changes:
+//!
+//! ```text
+//! file_diagnostics()
+//!     ├── path_unresolved_references()  → broken links, roles
+//!     ├── path_unresolved_images()      → missing image files
+//!     └── validate_frontmatter()        → schema validation
+//! ```
+//!
+//! # Performance
+//!
+//! Reference resolution uses `rayon` for parallel iteration over the vault's
+//! referenceables. Image validation checks the filesystem directly.
+//!
+//! # Configuration
+//!
+//! Diagnostics can be disabled via [`Settings::unresolved_diagnostics`]:
+//!
+//! ```json
+//! { "unresolved_diagnostics": false }
+//! ```
+
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
@@ -9,6 +48,22 @@ use crate::{
     vault::{self, Reference, Referenceable, Vault},
 };
 
+/// Find unresolved references in a file.
+///
+/// Returns references that don't resolve to any valid target:
+/// - Markdown links to non-existent files, headings, or blocks
+/// - MyST roles (`{ref}`, `{doc}`, `{term}`) with invalid targets
+/// - Substitutions (`{{var}}`) without definitions in the same file
+///
+/// # Arguments
+///
+/// * `vault` - The indexed vault containing all referenceables
+/// * `path` - Path to the file to check
+///
+/// # Returns
+///
+/// Vector of `(file_path, reference)` tuples for each unresolved reference,
+/// or `None` if the file doesn't exist in the vault.
 pub fn path_unresolved_references<'a>(
     vault: &'a Vault,
     path: &'a Path,

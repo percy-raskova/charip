@@ -142,6 +142,11 @@ pub enum MystDirective {
     // Other
     Math,
     Glossary,
+
+    // Custom rstnotes directives
+    Definition,
+    AiChat,
+    AiExchange,
 }
 
 impl MystDirective {
@@ -176,6 +181,10 @@ impl MystDirective {
             // Other
             Self::Math,
             Self::Glossary,
+            // Custom rstnotes directives
+            Self::Definition,
+            Self::AiChat,
+            Self::AiExchange,
         ]
     }
 
@@ -204,6 +213,9 @@ impl MystDirective {
             Self::Include => "include",
             Self::Math => "math",
             Self::Glossary => "glossary",
+            Self::Definition => "definition",
+            Self::AiChat => "ai-chat",
+            Self::AiExchange => "ai-exchange",
         }
     }
 
@@ -232,6 +244,9 @@ impl MystDirective {
             Self::Include => "Include another file",
             Self::Math => "A math block (LaTeX)",
             Self::Glossary => "A glossary of terms",
+            Self::Definition => "An inline term definition (rstnotes)",
+            Self::AiChat => "AI chat transcript (rstnotes)",
+            Self::AiExchange => "AI exchange block (rstnotes)",
         }
     }
 
@@ -263,6 +278,22 @@ impl MystDirective {
             ),
             Self::Include => format!(
                 "{fence}{{{name}}} ${{1:path/to/file.md}}\n{fence}",
+                fence = fence,
+                name = self.name()
+            ),
+            // Custom rstnotes directives
+            Self::Definition => format!(
+                "{fence}{{{name}}} ${{1:Term}}\n${{2:Definition of the term.}}\n{fence}",
+                fence = fence,
+                name = self.name()
+            ),
+            Self::AiChat => format!(
+                "{fence}{{{name}}}\n:model: ${{1:claude-3-opus}}\n:date: ${{2:YYYY-MM-DD}}\n\n${{3:Chat transcript}}\n{fence}",
+                fence = fence,
+                name = self.name()
+            ),
+            Self::AiExchange => format!(
+                "{fence}{{{name}}}\n:role: ${{1:user|assistant}}\n\n${{2:Message content}}\n{fence}",
                 fence = fence,
                 name = self.name()
             ),
@@ -595,11 +626,11 @@ mod tests {
 
         #[test]
         fn test_directive_count() {
-            // We expect exactly 22 directives
+            // We expect exactly 25 directives (22 standard + 3 rstnotes custom)
             assert_eq!(
                 MystDirective::all().len(),
-                22,
-                "Should have exactly 22 directives"
+                25,
+                "Should have exactly 25 directives"
             );
         }
     }

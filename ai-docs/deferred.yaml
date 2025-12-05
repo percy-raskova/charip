@@ -41,15 +41,46 @@ low_priority:
     usage: 3 instances in rstnotes
     effort: low
 
-  custom_directive_snippets:
-    description: scaffolds for definition, ai-chat, ai-exchange
+lib_restructure_deferrals:
+  # From Dec 4 2025 lib+bin restructure session
+
+  enable_doctests:
+    description: convert ignored doctests to executable examples
+    current: 16 doctests marked `ignore` in vault/mod.rs
+    alternative: integration tests in tests/vault_graph_test.rs cover same methods
+    methods:
+      - detect_include_cycles
+      - find_orphan_documents
+      - transitive_dependencies
+      - transitive_dependents
+      - count_labels
+      - count_references
+    effort: medium
+    priority: low
+    notes: integration tests provide equivalent coverage; doctests are nice-to-have
+
+  macro_visibility_tests:
+    description: dedicated tests for macro exports
+    macros:
+      - params_path!
+      - params_position_path!
+    current: basic compile-time check exists in tests/lib_api_test.rs
     effort: low
+    priority: low
+
+  act_workflow_testing:
+    description: local GitHub Actions testing with nektos/act
+    current: using scripts/validate-docs.sh for local validation
+    effort: low
+    priority: low
+    notes: shell script sufficient for current needs
 
 deferred_refactorings:
   test_helper_extraction:
     issue: create_test_vault_dir duplicated in tests
     recommendation: extract to shared test utilities module
     priority: low
+    notes: tests/lib_api_test.rs and tests/vault_graph_test.rs now share pattern
 
   generic_select_abstraction:
     issue: select_references and select_myst_symbols have identical patterns
@@ -76,6 +107,62 @@ future_architecture:
     effort: high
 
 recently_completed:
+  additional_module_docs:
+    description: added rustdoc to diagnostics.rs, hover.rs, symbol.rs
+    status: complete
+    date: 2025-12-04
+    modules:
+      - src/diagnostics.rs (diagnostic types, architecture, configuration)
+      - src/hover.rs (hover targets, configuration)
+      - src/symbol.rs (document symbols, workspace symbols)
+
+  custom_directive_snippets:
+    description: added rstnotes custom directive completions
+    status: complete
+    date: 2025-12-04
+    directives:
+      - definition (inline term definition)
+      - ai-chat (AI chat transcript with model/date options)
+      - ai-exchange (AI exchange block with role option)
+
+  lib_bin_restructure:
+    description: separated library and binary crates
+    status: complete
+    date: 2025-12-04
+    changes:
+      - src/lib.rs created with public API exports
+      - src/main.rs imports from charip:: namespace
+      - Cargo.toml updated with [lib] section
+      - GitHub Actions deploys cargo doc to Pages
+    benefits_realized:
+      - library consumable as external crate
+      - cargo doc generates API documentation
+      - 415 tests validate the architecture
+
+  integration_test_suite:
+    description: external API integration tests
+    status: complete
+    date: 2025-12-04
+    files:
+      - tests/lib_api_test.rs (14 tests)
+      - tests/vault_graph_test.rs (15 tests)
+      - scripts/validate-docs.sh
+    benefits_realized:
+      - proves lib+bin separation works
+      - validates graph API methods
+      - local CI simulation script
+
+  rustdoc_cleanup:
+    description: fixed all 25 rustdoc warnings
+    status: complete
+    date: 2025-12-04
+    fixes:
+      - vault/mod.rs (3 warnings)
+      - completion/mod.rs (8 warnings)
+      - myst_parser.rs (13 warnings)
+      - vault/graph.rs (1 warning)
+    ci_improvement: RUSTDOCFLAGS="-D warnings" now enforced
+
   graph_based_vault:
     description: replaced HashMap with petgraph DiGraph
     status: complete
