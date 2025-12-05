@@ -30,7 +30,7 @@
 //! workspace_symbol()  → fuzzy match     → Vec<SymbolInformation>
 //! ```
 
-use std::{iter, path::Path};
+use std::path::Path;
 
 use itertools::Itertools;
 use nucleo_matcher::{
@@ -42,7 +42,7 @@ use tower_lsp::lsp_types::{
     SymbolKind, WorkspaceSymbolParams,
 };
 
-use crate::vault::{MDHeading, Vault};
+use crate::vault::Vault;
 
 fn compute_match_score(
     matcher: &mut Matcher,
@@ -219,6 +219,11 @@ fn symbols_to_flat_list(symbols: Vec<FlatSymbol>) -> Vec<DocumentSymbol> {
         })
         .collect()
 }
+
+#[cfg(test)]
+use crate::vault::MDHeading;
+#[cfg(test)]
+use std::iter;
 
 #[cfg(test)]
 #[derive(PartialEq, Debug)]
