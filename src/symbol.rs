@@ -220,12 +220,14 @@ fn symbols_to_flat_list(symbols: Vec<FlatSymbol>) -> Vec<DocumentSymbol> {
         .collect()
 }
 
+#[cfg(test)]
 #[derive(PartialEq, Debug)]
 struct Node {
     heading: MDHeading,
     children: Option<Vec<Node>>,
 }
 
+#[cfg(test)]
 fn construct_tree(headings: &[MDHeading]) -> Option<Vec<Node>> {
     match &headings {
         [only] => {
@@ -267,6 +269,7 @@ fn construct_tree(headings: &[MDHeading]) -> Option<Vec<Node>> {
     }
 }
 
+#[cfg(test)]
 #[allow(dead_code)] // Reserved for future nested heading symbol support
 #[allow(deprecated)] // field deprecated has been deprecated in favor of using tags and will be removed in the future
 fn map_to_lsp_tree(tree: Vec<Node>) -> Vec<DocumentSymbol> {

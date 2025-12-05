@@ -8,7 +8,7 @@ use crate::vault::{MDLinkReferenceDefinition, Refname};
 
 use crate::vault::Reference::Footnote;
 use crate::vault::{
-    MDFile, MDFootnote, MDHeading, MDIndexedBlock, MDTag, Reference, Referenceable,
+    MDFootnote, MDHeading, MDIndexedBlock, MDTag, Reference, Referenceable,
 };
 
 #[test]
