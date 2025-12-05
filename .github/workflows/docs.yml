@@ -45,7 +45,7 @@ jobs:
         run: cargo doc --no-deps --lib
 
       - name: Verify redirect target exists
-        run: test -d target/doc/charip || { echo "ERROR: charip/ not found"; exit 1; }
+        run: 'test -d target/doc/charip || { echo "ERROR: charip/ not found"; exit 1; }'
 
       - name: Add redirect index
         run: echo '<meta http-equiv="refresh" content="0;url=charip/">' > target/doc/index.html
