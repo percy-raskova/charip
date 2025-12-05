@@ -210,9 +210,8 @@ impl DocumentNode {
                 myst_symbols
                     .iter()
                     .filter(|s| {
-                        s.kind == MystSymbolKind::Directive
-                            && s.label.is_some()
-                            && s.name != "math" // math labels are handled separately
+                        s.kind == MystSymbolKind::Directive && s.label.is_some() && s.name != "math"
+                        // math labels are handled separately
                     })
                     .map(|directive| Referenceable::DirectiveLabel(&self.path, directive)),
             )

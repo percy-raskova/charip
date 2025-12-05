@@ -34,14 +34,21 @@ fn test_vault_construction_from_external_crate() {
     let (_temp_dir, vault_dir) = create_test_vault_dir();
 
     // Create a minimal test file
-    fs::write(vault_dir.join("test.md"), "# Test Document\n\nSome content.").unwrap();
+    fs::write(
+        vault_dir.join("test.md"),
+        "# Test Document\n\nSome content.",
+    )
+    .unwrap();
 
     let settings = Settings::default();
     let vault = Vault::construct_vault(&settings, &vault_dir);
 
     assert!(vault.is_ok(), "Vault construction should succeed");
     let vault = vault.unwrap();
-    assert!(vault.document_count() >= 1, "Vault should contain at least 1 document");
+    assert!(
+        vault.document_count() >= 1,
+        "Vault should contain at least 1 document"
+    );
 }
 
 #[test]

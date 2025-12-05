@@ -12,6 +12,7 @@
 //! | Broken image | Error | Image path that doesn't exist on disk |
 //! | Undefined substitution | Warning | `{{var}}` with no definition |
 //! | Frontmatter error | Error | Invalid YAML or schema violation |
+//! | Include cycle | Error | Circular `{include}` directive dependency |
 //!
 //! # Architecture
 //!
@@ -21,7 +22,8 @@
 //! file_diagnostics()
 //!     ├── path_unresolved_references()  → broken links, roles
 //!     ├── path_unresolved_images()      → missing image files
-//!     └── validate_frontmatter()        → schema validation
+//!     ├── validate_frontmatter()        → schema validation
+//!     └── path_include_cycles()         → circular includes
 //! ```
 //!
 //! # Performance
@@ -217,6 +219,46 @@ fn frontmatter_diagnostics(
         .collect()
 }
 
+/// Generate diagnostics for include cycles involving the given file.
+///
+/// Uses Tarjan's SCC algorithm (via `Vault::detect_include_cycles()`) to find
+/// cycles in the include graph. Returns a diagnostic for each cycle that
+/// contains the specified file.
+///
+/// # Arguments
+///
+/// * `vault` - The indexed vault containing the include graph
+/// * `path` - Path to the file to check for cycle participation
+///
+/// # Returns
+///
+/// Vector of ERROR-severity diagnostics, one for each cycle the file participates in.
+/// Returns empty vec if the file is not in any cycle.
+fn path_include_cycles(vault: &Vault, path: &Path) -> Vec<Diagnostic> {
+    vault
+        .detect_include_cycles()
+        .into_iter()
+        .filter(|cycle| cycle.iter().any(|p| p == path))
+        .map(|cycle| {
+            let cycle_str = cycle
+                .iter()
+                .map(|p| p.file_name().unwrap_or_default().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            Diagnostic {
+                range: tower_lsp::lsp_types::Range {
+                    start: tower_lsp::lsp_types::Position::new(0, 0),
+                    end: tower_lsp::lsp_types::Position::new(0, 1),
+                },
+                message: format!("Circular include detected: {}", cycle_str),
+                source: Some("charip".into()),
+                severity: Some(DiagnosticSeverity::ERROR),
+                ..Default::default()
+            }
+        })
+        .collect()
+}
+
 #[allow(dead_code)]
 pub fn diagnostics(
     vault: &Vault,
@@ -304,6 +346,10 @@ pub fn diagnostics_with_schema(
     // Generate frontmatter validation diagnostics
     let frontmatter_diags = frontmatter_diagnostics(vault, path, schema);
     diags.extend(frontmatter_diags);
+
+    // Generate cycle diagnostics for include directives
+    let cycle_diags = path_include_cycles(vault, path);
+    diags.extend(cycle_diags);
 
     Some(diags)
 }
@@ -3736,5 +3782,158 @@ tags: "not-an-array"
             "File without frontmatter should have no frontmatter diagnostics. Got: {:?}",
             frontmatter_diags
         );
+    }
+
+    // =========================================================================
+    // Include Cycle Diagnostic Tests
+    // =========================================================================
+    //
+    // Tests for detecting circular include dependencies and reporting them
+    // as LSP diagnostics. Include cycles block Sphinx builds, so they are
+    // reported with ERROR severity.
+
+    mod include_cycle_diagnostics {
+        use super::*;
+
+        /// Test: Files participating in an include cycle get an ERROR diagnostic.
+        ///
+        /// Creates A -> B -> C -> A cycle, then verifies that calling diagnostics
+        /// on file A produces a "Circular include" error.
+        #[test]
+        fn test_cycle_diagnostic_generated_for_file_in_cycle() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create cycle: a.md -> b.md -> c.md -> a.md
+            fs::write(vault_dir.join("a.md"), "```{include} b.md\n```").unwrap();
+            fs::write(vault_dir.join("b.md"), "```{include} c.md\n```").unwrap();
+            fs::write(vault_dir.join("c.md"), "```{include} a.md\n```").unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("a.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return Some for file in cycle");
+            let diags = result.unwrap();
+
+            // Find cycle-related diagnostics
+            let cycle_diags: Vec<_> = diags
+                .iter()
+                .filter(|d| d.message.contains("Circular include"))
+                .collect();
+
+            assert_eq!(
+                cycle_diags.len(),
+                1,
+                "Should have exactly 1 cycle diagnostic for file a.md"
+            );
+            assert_eq!(
+                cycle_diags[0].severity,
+                Some(DiagnosticSeverity::ERROR),
+                "Cycle diagnostic should be ERROR severity"
+            );
+        }
+
+        /// Test: Files NOT participating in a cycle get NO cycle diagnostic.
+        ///
+        /// Creates A -> B -> C -> A cycle plus unrelated file D.
+        /// Verifies that file D has no cycle-related diagnostics.
+        #[test]
+        fn test_no_cycle_diagnostic_for_unrelated_file() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create cycle: a.md -> b.md -> c.md -> a.md
+            fs::write(vault_dir.join("a.md"), "```{include} b.md\n```").unwrap();
+            fs::write(vault_dir.join("b.md"), "```{include} c.md\n```").unwrap();
+            fs::write(vault_dir.join("c.md"), "```{include} a.md\n```").unwrap();
+
+            // Create unrelated file d.md (not in any cycle)
+            fs::write(
+                vault_dir.join("d.md"),
+                "# Unrelated file\n\nNo cycles here.",
+            )
+            .unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("d.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return Some for file d.md");
+            let diags = result.unwrap();
+
+            // No cycle-related diagnostics for unrelated file
+            let cycle_diags: Vec<_> = diags
+                .iter()
+                .filter(|d| d.message.contains("Circular include"))
+                .collect();
+
+            assert!(
+                cycle_diags.is_empty(),
+                "Unrelated file should have no cycle diagnostics, got: {:?}",
+                cycle_diags
+            );
+        }
+
+        /// Test: Cycle diagnostic message shows the cycle path.
+        ///
+        /// Creates A -> B -> A cycle and verifies the diagnostic message
+        /// contains both file names showing the cycle path.
+        #[test]
+        fn test_cycle_diagnostic_shows_cycle_path() {
+            let (_temp_dir, vault_dir) = create_test_vault_dir();
+
+            // Create simple 2-node cycle: a.md -> b.md -> a.md
+            fs::write(vault_dir.join("a.md"), "```{include} b.md\n```").unwrap();
+            fs::write(vault_dir.join("b.md"), "```{include} a.md\n```").unwrap();
+
+            let settings = Settings {
+                unresolved_diagnostics: true,
+                ..Settings::default()
+            };
+
+            let vault =
+                Vault::construct_vault(&settings, &vault_dir).expect("Failed to construct vault");
+
+            let file_path = vault_dir.join("a.md");
+            let uri = Url::from_file_path(&file_path).unwrap();
+
+            let result = diagnostics(&vault, &settings, (&file_path, &uri));
+
+            assert!(result.is_some(), "Should return Some for file in cycle");
+            let diags = result.unwrap();
+
+            // Find cycle-related diagnostic
+            let cycle_diags: Vec<_> = diags
+                .iter()
+                .filter(|d| d.message.contains("Circular include"))
+                .collect();
+
+            assert_eq!(cycle_diags.len(), 1, "Should have 1 cycle diagnostic");
+
+            // Message should contain both file names
+            let msg = &cycle_diags[0].message;
+            assert!(
+                msg.contains("a.md") && msg.contains("b.md"),
+                "Cycle message should show both files in cycle. Got: {}",
+                msg
+            );
+        }
     }
 }

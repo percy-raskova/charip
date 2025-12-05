@@ -373,7 +373,10 @@ mod tests {
                 snippet.contains("{doc}"),
                 "Snippet should contain role syntax"
             );
-            assert!(snippet.contains("$1"), "Snippet should have cursor position");
+            assert!(
+                snippet.contains("$1"),
+                "Snippet should have cursor position"
+            );
             assert!(
                 snippet.contains("\\`"),
                 "Snippet should have escaped backticks"

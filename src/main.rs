@@ -17,7 +17,6 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 // Import from the charip library crate
-use charip::{params_path, params_position_path};
 use charip::cli;
 use charip::codeactions;
 use charip::codelens;
@@ -33,6 +32,7 @@ use charip::rename;
 use charip::symbol::{document_symbol, workspace_symbol};
 use charip::tokens;
 use charip::vault::{Preview, Rangeable, Reference, Vault};
+use charip::{params_path, params_position_path};
 
 #[derive(Debug)]
 struct Backend {

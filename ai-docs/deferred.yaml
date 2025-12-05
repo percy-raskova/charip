@@ -30,11 +30,6 @@ medium_priority:
     source: conf.py myst_substitutions
     effort: medium
 
-  cycle_detection:
-    description: detect circular includes
-    notes: petgraph is integrated; needs algorithm implementation
-    effort: medium
-
 low_priority:
   func_role:
     description: "{func}" role completion
@@ -107,6 +102,16 @@ future_architecture:
     effort: high
 
 recently_completed:
+  cycle_detection_diagnostics:
+    description: integrated include cycle detection into LSP diagnostics
+    status: complete
+    date: 2025-12-04
+    implementation:
+      - path_include_cycles() function in src/diagnostics.rs
+      - diagnostics_with_schema() integration
+      - 3 TDD tests for cycle diagnostics
+    notes: algorithm already existed (Tarjan's SCC); this adds LSP diagnostic reporting
+
   additional_module_docs:
     description: added rustdoc to diagnostics.rs, hover.rs, symbol.rs
     status: complete

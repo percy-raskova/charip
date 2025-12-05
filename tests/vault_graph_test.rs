@@ -33,14 +33,21 @@ fn test_count_labels_no_labels() {
 
     // Create a file with NO headings, no anchors, no blocks
     // Note: The parser requires at least some content
-    fs::write(vault_dir.join("plain.md"), "Just plain text without any labels.").unwrap();
+    fs::write(
+        vault_dir.join("plain.md"),
+        "Just plain text without any labels.",
+    )
+    .unwrap();
 
     let settings = Settings::default();
     let vault = Vault::construct_vault(&settings, &vault_dir).unwrap();
 
     let count = vault.count_labels();
     // No headings, no anchors, no indexed blocks = 0 labels
-    assert_eq!(count, 0, "Document with no headings/anchors should have 0 labels");
+    assert_eq!(
+        count, 0,
+        "Document with no headings/anchors should have 0 labels"
+    );
 }
 
 #[test]
@@ -84,7 +91,11 @@ fn test_count_labels_with_anchors() {
     // count_labels counts headings + indexed blocks + anchors + directive labels
     // We have 2 headings + 2 anchors = 4 labels minimum
     let count = vault.count_labels();
-    assert!(count >= 4, "Should count at least 4 labels (2 headings + 2 anchors), got {}", count);
+    assert!(
+        count >= 4,
+        "Should count at least 4 labels (2 headings + 2 anchors), got {}",
+        count
+    );
 }
 
 // ============================================================================
@@ -124,7 +135,11 @@ fn test_count_references_with_links() {
     let vault = Vault::construct_vault(&settings, &vault_dir).unwrap();
 
     let count = vault.count_references();
-    assert!(count >= 2, "Should count at least 2 markdown links, got {}", count);
+    assert!(
+        count >= 2,
+        "Should count at least 2 markdown links, got {}",
+        count
+    );
 }
 
 // ============================================================================
@@ -141,7 +156,10 @@ fn test_transitive_dependencies_no_links() {
     let vault = Vault::construct_vault(&settings, &vault_dir).unwrap();
 
     let deps = vault.transitive_dependencies(&vault_dir.join("isolated.md"));
-    assert!(deps.is_empty(), "File with no links should have no dependencies");
+    assert!(
+        deps.is_empty(),
+        "File with no links should have no dependencies"
+    );
 }
 
 #[test]
@@ -236,7 +254,10 @@ fn test_find_orphan_documents_all_in_toctree() {
     let vault = Vault::construct_vault(&settings, &vault_dir).unwrap();
 
     let orphans = vault.find_orphan_documents(&vault_dir.join("index.md"));
-    assert!(orphans.is_empty(), "All documents in toctree should not be orphans");
+    assert!(
+        orphans.is_empty(),
+        "All documents in toctree should not be orphans"
+    );
 }
 
 #[test]
@@ -276,7 +297,10 @@ fn test_detect_include_cycles_no_cycles() {
     let vault = Vault::construct_vault(&settings, &vault_dir).unwrap();
 
     let cycles = vault.detect_include_cycles();
-    assert!(cycles.is_empty(), "Linear include chain should have no cycles");
+    assert!(
+        cycles.is_empty(),
+        "Linear include chain should have no cycles"
+    );
 }
 
 #[test]
@@ -292,7 +316,10 @@ fn test_detect_include_cycles_with_cycle() {
     let vault = Vault::construct_vault(&settings, &vault_dir).unwrap();
 
     let cycles = vault.detect_include_cycles();
-    assert!(!cycles.is_empty(), "Should detect the a -> b -> c -> a cycle");
+    assert!(
+        !cycles.is_empty(),
+        "Should detect the a -> b -> c -> a cycle"
+    );
 }
 
 #[test]
@@ -306,7 +333,10 @@ fn test_detect_include_cycles_self_include() {
     let vault = Vault::construct_vault(&settings, &vault_dir).unwrap();
 
     let cycles = vault.detect_include_cycles();
-    assert!(!cycles.is_empty(), "Self-include should be detected as a cycle");
+    assert!(
+        !cycles.is_empty(),
+        "Self-include should be detected as a cycle"
+    );
 }
 
 #[test]

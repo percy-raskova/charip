@@ -988,9 +988,7 @@ This note has no label - should NOT appear in workspace symbols.
             let symbols = symbols.unwrap();
 
             // Should find introduction-section
-            let intro_symbol = symbols
-                .iter()
-                .find(|s| s.name.contains("introduction"));
+            let intro_symbol = symbols.iter().find(|s| s.name.contains("introduction"));
             assert!(
                 intro_symbol.is_some(),
                 "Fuzzy match should find 'introduction-section' from query 'intro'"
