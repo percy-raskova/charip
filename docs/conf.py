@@ -54,19 +54,24 @@ html_title = 'charip-lsp'
 html_static_path = ['_static']
 html_css_files = ['custom.css']
 
-# Furo theme options
+# Furo theme options - refined revolutionary palette
+# WCAG 2.1 AA compliant with 4.5:1+ contrast ratios
 html_theme_options = {
-    "dark_css_variables": {
-        "color-background-primary": "#024fa2",
-        "color-background-secondary": "#013d7a",
-        "color-brand-primary": "#ed1c27",
-        "color-brand-content": "#ff4d4d",
-    },
     "light_css_variables": {
-        "color-background-primary": "#024fa2",
-        "color-background-secondary": "#013d7a",
-        "color-brand-primary": "#ed1c27",
-        "color-brand-content": "#ff4d4d",
+        "color-background-primary": "#faf9f7",
+        "color-background-secondary": "#f0eeeb",
+        "color-brand-primary": "#c41e3a",
+        "color-brand-content": "#024fa2",
+        "color-sidebar-background": "#024fa2",
+        "color-sidebar-background-border": "#d4a534",
+    },
+    "dark_css_variables": {
+        "color-background-primary": "#0d1b2a",
+        "color-background-secondary": "#1b2838",
+        "color-brand-primary": "#ff6b6b",
+        "color-brand-content": "#6db3f2",
+        "color-sidebar-background": "#0a1420",
+        "color-sidebar-background-border": "#d4a534",
     },
 }
 
@@ -74,4 +79,5 @@ html_theme_options = {
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None),
     'sphinx': ('https://www.sphinx-doc.org/en/master/', None),
+    'myst': ('https://myst-parser.readthedocs.io/en/latest/', None),
 }

@@ -4,9 +4,13 @@ title: Using Autocomplete
 
 # Using Autocomplete
 
-charip-lsp provides context-aware autocomplete throughout your MyST documents.
+charip-lsp provides context-aware autocomplete throughout your [MyST](inv:myst#index) documents.
 
 ## Directive Completion
+
+```{seealso}
+[MyST Directive Syntax](inv:myst#syntax/roles-and-directives) for complete directive documentation.
+```
 
 When you type the opening of a fenced code block with a brace, directive suggestions appear:
 
@@ -52,6 +56,10 @@ See the {
 Type `{` in running text (not after ` ``` ` or `:::` which indicate directives).
 
 ## Role Target Completion
+
+```{seealso}
+[MyST Cross-referencing](inv:myst#syntax/cross-referencing) for complete role documentation.
+```
 
 After typing a role and opening backtick, targets are suggested:
 

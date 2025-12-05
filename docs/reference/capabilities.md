@@ -4,7 +4,7 @@ title: LSP Capabilities
 
 # LSP Capabilities
 
-This document provides a comprehensive overview of what charip-lsp can do for MyST documentation projects.
+This document provides a comprehensive overview of what charip-lsp can do for [MyST](inv:myst#index) documentation projects.
 
 ## At a Glance
 
@@ -20,7 +20,11 @@ This document provides a comprehensive overview of what charip-lsp can do for My
 
 ## Completions
 
-charip-lsp provides intelligent autocomplete for MyST syntax.
+```{seealso}
+[MyST Roles and Directives](inv:myst#syntax/roles-and-directives) - Official syntax documentation
+```
+
+charip-lsp provides intelligent autocomplete for [MyST syntax](inv:myst#index).
 
 ### Directive Completion
 
@@ -146,15 +150,16 @@ substitutions:
 
 Circular includes are detected and reported:
 
-```markdown
+````text
 # a.md
 ```{include} b.md
 ```
 
 # b.md
-```{include} a.md  ⚠️ Include cycle detected: a.md → b.md → a.md
+```{include} a.md
 ```
-```
+⚠️ Include cycle detected: a.md → b.md → a.md
+````
 
 Uses Tarjan's strongly connected components algorithm for efficient detection.
 
@@ -238,6 +243,13 @@ This enables:
 ---
 
 ## Supported MyST Syntax
+
+```{seealso}
+For detailed syntax documentation, see:
+- [Roles and Directives](inv:myst#syntax/roles-and-directives)
+- [Cross-references](inv:myst#syntax/cross-referencing)
+- [Optional Extensions](inv:myst#syntax/optional)
+```
 
 ### Directives Parsed
 

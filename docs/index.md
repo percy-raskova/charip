@@ -4,7 +4,7 @@ title: charip-lsp Documentation
 
 # charip-lsp
 
-A Language Server Protocol implementation for [MyST](https://myst-parser.readthedocs.io/) (Markedly Structured Text) documentation projects.
+A Language Server Protocol implementation for [MyST](inv:myst#index) (Markedly Structured Text) documentation projects.
 
 ## What is charip-lsp?
 
@@ -104,5 +104,5 @@ contributing/commit-philosophy
 ## Links
 
 - [Source Code](https://github.com/user/charip-lsp)
-- [MyST Parser Documentation](https://myst-parser.readthedocs.io/)
+- [MyST Parser Documentation](inv:myst#index)
 - [Language Server Protocol Specification](https://microsoft.github.io/language-server-protocol/)

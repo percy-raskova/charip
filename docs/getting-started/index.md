@@ -8,7 +8,7 @@ This section guides you through installing charip-lsp and configuring your edito
 
 ## Prerequisites
 
-- A MyST/Sphinx documentation project
+- A [MyST](inv:myst#index)/Sphinx documentation project
 - One of the supported editors:
   - Neovim (0.8+)
   - VS Code

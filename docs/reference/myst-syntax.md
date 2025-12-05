@@ -4,9 +4,13 @@ title: MyST Syntax Support
 
 # MyST Syntax Support
 
-This reference documents all MyST syntax that charip-lsp understands and provides intelligence for.
+This reference documents all [MyST syntax](inv:myst#index) that charip-lsp understands and provides intelligence for.
 
 ## Directives
+
+```{seealso}
+[MyST Roles and Directives](inv:myst#syntax/roles-and-directives) - Official documentation
+```
 
 ### Detection
 
@@ -50,6 +54,10 @@ Reference with `` {ref}`my-note` ``.
 
 ## Roles
 
+```{seealso}
+[MyST Roles and Directives](inv:myst#syntax/roles-and-directives) - Official documentation
+```
+
 ### Detection
 
 Roles are detected in inline text:
@@ -80,6 +88,10 @@ For each role, charip-lsp extracts:
 
 ## Anchors
 
+```{seealso}
+[MyST Cross-references](inv:myst#syntax/cross-referencing) - Official documentation
+```
+
 ### Syntax
 
 ```markdown
@@ -106,6 +118,10 @@ Creates implicit anchor `my-heading-title`.
 - Associated heading (if any)
 
 ## Frontmatter
+
+```{seealso}
+[MyST Configuration](inv:myst#configuration) - Official documentation
+```
 
 ### Substitutions
 
@@ -158,6 +174,10 @@ Term Two
 
 ## Cross-Reference Resolution
 
+```{seealso}
+[MyST Cross-references](inv:myst#syntax/cross-referencing) - Official documentation
+```
+
 ### Forward Resolution (Go-to-Definition)
 
 | Reference | Resolves To |
@@ -175,6 +195,10 @@ Term Two
 From any anchor, heading, or file, find all references pointing to it.
 
 ## Extensions Supported
+
+```{seealso}
+[MyST Optional Syntax Extensions](inv:myst#syntax/optional) - Official documentation
+```
 
 charip-lsp supports MyST documents using these extensions:
 
